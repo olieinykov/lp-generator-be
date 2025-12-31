@@ -173,6 +173,8 @@ export const createBlock = async (request, reply) => {
     const definitionContent = archiveResult.files["definition.json"].content;
     const templateDefinition = JSON.parse(definitionContent);
 
+    console.log("archiveResult.files", archiveResult.files)
+
     const blockDefinition = {
       originalArchive: fileData.filename,
       mimeType: fileData.mimetype,
@@ -191,10 +193,10 @@ export const createBlock = async (request, reply) => {
           size: archiveResult.files["styles.css"].size,
           lines: archiveResult.files["styles.css"].content.split("\n").length,
         },
-        script: {
-          size: archiveResult.files["main.js"].size,
-          lines: archiveResult.files["main.js"].content.split("\n").length,
-        },
+        // script: {
+        //   size: archiveResult.files["main.js"].size,
+        //   lines: archiveResult.files["main.js"].content.split("\n").length,
+        // },
       },
       validation: {
         isValid: archiveResult.isValid,

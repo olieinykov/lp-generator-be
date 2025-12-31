@@ -2,7 +2,6 @@ export const registerNewUserSchema = {
   tags: ["Auth"],
   summary: "Register new user",
   description: "Create a new user account",
-
   body: {
     type: "object",
     required: ["email", "password", "username"],
