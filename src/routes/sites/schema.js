@@ -90,3 +90,8 @@ export const getAllSitesSchema = {
 		},
 	},
 };
+export const getSiteSchema = {
+	tags: ['Sites'],
+	summary: 'Get site details',
+	description: 'Get site details',
+};
