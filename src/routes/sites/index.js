@@ -1,5 +1,5 @@
-import { createSite, getAllSites } from './handlers.js';
-import { createSiteSchema, getAllSitesSchema } from './schema.js';
+import { createSite, getAllSites, getOneSite } from './handlers.js';
+import { createSiteSchema, getAllSitesSchema, getSiteSchema } from './schema.js';
 
 const routes = async (fastify) => {
 	fastify.post('/', {
@@ -10,6 +10,10 @@ const routes = async (fastify) => {
 	fastify.get('/', {
 		handler: getAllSites,
 		schema: getAllSitesSchema,
+	});
+	fastify.get('/:siteId', {
+		handler: getOneSite,
+		schema: getSiteSchema,
 	});
 };
 

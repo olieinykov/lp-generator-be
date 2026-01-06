@@ -1,129 +1,10 @@
-import OpenAI from 'openai';
 import { db, supabase } from '../../db/connection.js';
 import { blocks, templates, sites, profiles } from '../../db/schema.js';
 import { and, asc, count, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
 import AdmZip from 'adm-zip';
-import * as fal from '@fal-ai/serverless-client';
 import { alias } from 'drizzle-orm/pg-core';
-
-const openai = new OpenAI({
-	apiKey: process.env.OPEN_AI_KEY,
-});
-
-fal.config({
-	credentials: process.env.FAL_KEY,
-});
-
-async function generateImageWithFal(prompt) {
-	try {
-		const result = await fal.subscribe('fal-ai/flux/schnell', {
-			input: {
-				prompt: prompt,
-				image_size: 'landscape_16_9',
-				num_inference_steps: 4,
-				num_images: 1,
-			},
-		});
-
-		console.log('Image result', result);
-
-		return result.images[0].url;
-	} catch (error) {
-		console.error('Fal.ai error:', error);
-		return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=600`;
-	}
-}
-
-async function downloadAndUnzipBlock(archiveUrl) {
-	const response = await fetch(archiveUrl);
-	const arrayBuffer = await response.arrayBuffer();
-	const buffer = Buffer.from(arrayBuffer);
-
-	const zip = new AdmZip(buffer);
-	const zipEntries = zip.getEntries();
-
-	const blockData = {};
-
-	zipEntries.forEach((entry) => {
-		const content = entry.getData().toString('utf8');
-
-		if (entry.entryName === 'definition.json') {
-			blockData.definition = JSON.parse(content);
-		} else if (entry.entryName === 'template.html') {
-			blockData.html = content;
-		} else if (entry.entryName === 'styles.css') {
-			blockData.css = content;
-		}
-	});
-
-	return blockData;
-}
-
-async function generateAIContent(prompt, variables, blockCategory) {
-	const variablesDescription = variables
-		.map((v) => `- ${v.name} (type: ${v.type}, required: ${v.required})`)
-		.join('\n');
-
-	const systemPrompt = `You are a content generator for website blocks. Generate realistic, professional content based on the user's request.
-
-Block type: ${blockCategory}
-Variables to fill:
-${variablesDescription}
-
-Return ONLY a valid JSON object. Follow these rules for each variable type:
-
-1. For "text" type:
-   {"variableName": {"value": "your text content here"}}
-
-2. For "image" type:
-   {"variableName": {"value": null, "src": "descriptive image name", "alt": "alternative text"}}
-
-3. For "link" type:
-   {"variableName": {"value": null, "href": "url or #anchor", "label": "link text"}}
-
-Example response:
-{
-  "title": {"value": "Transform Your Business Today"},
-  "logo": {"value": null, "src": "modern tech company logo", "alt": "Company Logo"},
-  "navItem1": {"value": null, "href": "#about", "label": "About Us"},
-  "navItem2": {"value": null, "href": "#services", "label": "Services"},
-  "heroText": {"value": "We help businesses grow with innovative solutions"}
-}
-
-Important: 
-- Generate content appropriate for ${blockCategory} blocks
-- Make links meaningful and contextual
-- Keep text concise and professional`;
-
-	const completion = await openai.chat.completions.create({
-		model: 'gpt-4o-mini',
-		messages: [
-			{ role: 'system', content: systemPrompt },
-			{ role: 'user', content: prompt || 'Create professional website content' },
-		],
-		temperature: 0.7,
-	});
-
-	const content = completion.choices[0].message.content;
-	const jsonMatch = content.match(/\{[\s\S]*\}/);
-
-	if (!jsonMatch) {
-		throw new Error('AI did not return valid JSON');
-	}
-
-	const result = JSON.parse(jsonMatch[0]);
-
-	for (const varName of Object.keys(result)) {
-		const variable = variables.find((v) => v.name === varName);
-		if (variable?.type === 'image') {
-			const description = result[varName].src || `${blockCategory} ${varName}`;
-			console.log(`Generating image for ${varName}: ${description}`);
-			result[varName].src = await generateImageWithFal(description);
-		}
-	}
-
-	return result;
-}
+import { generateAIContent } from '../../utils/aiContentGenerator.js';
+import { downloadAndUnzipBlock } from '../../utils/zipHandler.js';
 
 function fillVariables(html, aiContent) {
 	let filledHtml = html;
@@ -355,6 +236,33 @@ export const getAllSites = async (request, reply) => {
 		});
 	} catch (error) {
 		reply.code(400).send({
+			success: false,
+			error: error.message,
+		});
+	}
+};
+
+export const getOneSite = async (request, reply) => {
+	try {
+		const { siteId } = request.params;
+
+		const [site] = await db
+			.select()
+			.from(sites)
+			.where(eq(sites.id, parseInt(siteId)));
+
+		const response = await fetch(site.archiveUrl);
+
+		if (!response.ok) {
+			throw new Error(`Failed to download archive: ${response.status}`);
+		}
+
+		reply.send({
+			success: true,
+			...site,
+		});
+	} catch (error) {
+		reply.code(500).send({
 			success: false,
 			error: error.message,
 		});
