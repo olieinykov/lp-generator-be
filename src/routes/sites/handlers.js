@@ -5,6 +5,7 @@ import AdmZip from 'adm-zip';
 import { alias } from 'drizzle-orm/pg-core';
 import { generateAIContent } from '../../utils/aiContentGenerator.js';
 import { downloadAndUnzipBlock } from '../../utils/zipHandler.js';
+import JSZip from 'jszip';
 
 function fillVariables(html, aiContent) {
 	let filledHtml = html;
@@ -251,9 +252,24 @@ export const getOneSite = async (request, reply) => {
 			.from(sites)
 			.where(eq(sites.id, parseInt(siteId)));
 
+		const response = await fetch(site.archiveUrl);
+		if (!response.ok) {
+			throw new Error(`Failed to download archive: ${response.status}`);
+		}
+		const responseArrayBuffer = await response.arrayBuffer();
+		const zip = await JSZip.loadAsync(responseArrayBuffer);
+		const previewFile = zip.file('index.html');
+		let preview;
+		if (previewFile) {
+			preview = await previewFile.async('string');
+		} else {
+			preview = 'Can`t find preview file';
+		}
+
 		reply.send({
 			success: true,
 			...site,
+			preview,
 		});
 	} catch (error) {
 		reply.code(500).send({
