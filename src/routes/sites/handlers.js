@@ -251,12 +251,6 @@ export const getOneSite = async (request, reply) => {
 			.from(sites)
 			.where(eq(sites.id, parseInt(siteId)));
 
-		const response = await fetch(site.archiveUrl);
-
-		if (!response.ok) {
-			throw new Error(`Failed to download archive: ${response.status}`);
-		}
-
 		reply.send({
 			success: true,
 			...site,
