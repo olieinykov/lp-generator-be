@@ -73,7 +73,6 @@ Important:
 		],
 		temperature: 0.7,
 	});
-
 	const content = completion.choices[0].message.content;
 	const jsonMatch = content.match(/\{[\s\S]*\}/);
 
