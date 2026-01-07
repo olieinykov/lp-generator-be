@@ -206,6 +206,9 @@ export const getAllSites = async (request, reply) => {
 				definition: sites.definition,
 				createdAt: sites.createdAt,
 				updatedAt: sites.updatedAt,
+				promptTokens: sites.promptTokens,
+				completionTokens: sites.completionTokens,
+				totalTokens: sites.totalTokens,
 				createdByEmail: createdByProfile.email,
 				createdByUsername: createdByProfile.username,
 				updatedByEmail: updatedByProfile.email,
@@ -272,7 +275,7 @@ export const getOneSite = async (request, reply) => {
 			data: {
 				...site,
 				preview,
-			}
+			},
 		});
 	} catch (error) {
 		reply.code(500).send({
