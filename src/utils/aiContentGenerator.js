@@ -91,5 +91,12 @@ Important:
 		}
 	}
 
-	return result;
+	return [
+		result,
+		{
+			promptTokens: completion.usage.prompt_tokens,
+			completionTokens: completion.usage.completion_tokens,
+			totalTokens: completion.usage.total_tokens,
+		},
+	];
 }

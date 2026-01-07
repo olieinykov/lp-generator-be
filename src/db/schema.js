@@ -74,7 +74,7 @@ export const sites = pgTable('sites', {
 	}),
 	createdAt: timestamp('created_at').defaultNow().notNull(),
 	updatedAt: timestamp('updated_at').defaultNow().notNull(),
-	promptTokens: integer('prompt_tokens').notNull(),
-	completionTokens: integer('completion_tokens').notNull(),
-	totalTokens: integer('total_tokens').notNull(),
+	promptTokens: integer('prompt_tokens'),
+	completionTokens: integer('completion_tokens'),
+	totalTokens: integer('total_tokens'),
 });

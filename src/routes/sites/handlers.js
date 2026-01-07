@@ -39,6 +39,7 @@ export const createSite = async (request, reply) => {
 
 		let allStyles = '';
 		let allHtml = '';
+		let tokensInfo;
 
 		for (const blockDef of template.definition.blocks) {
 			const blocksOfType = await db
@@ -50,12 +51,12 @@ export const createSite = async (request, reply) => {
 				const randomBlock = blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
 				const blockData = await downloadAndUnzipBlock(randomBlock.archiveUrl);
 
-				const aiContent = await generateAIContent(
+				const [aiContent, tokens] = await generateAIContent(
 					prompt,
 					blockData.definition.variables,
 					blockDef.type,
 				);
-
+				tokensInfo = tokens;
 				console.log('AI Content:', JSON.stringify(aiContent, null, 2));
 
 				const filledHtml = fillVariables(blockData.html, aiContent);
@@ -118,6 +119,9 @@ ${allHtml}
 				language: language,
 				definition: template.id,
 				prompt: prompt,
+				totalTokens: tokensInfo.totalTokens,
+				completionTokens: tokensInfo.completionTokens,
+				promptTokens: tokensInfo.promptTokens,
 				createdBy: '67366103-2833-41a8-aea2-10d589a0705c',
 				updatedBy: '67366103-2833-41a8-aea2-10d589a0705c',
 			})
