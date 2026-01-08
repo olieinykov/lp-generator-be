@@ -34,36 +34,114 @@ export async function generateAIContent(prompt, variables, blockCategory) {
 		.map((v) => `- ${v.name} (type: ${v.type}, required: ${v.required})`)
 		.join('\n');
 
-	const systemPrompt = `You are a content generator for website blocks. Generate realistic, professional content based on the user's request.
+// 	const systemPrompt = `You are a content generator for website blocks. Generate realistic, professional content based on the user's request.
+//
+// Block type: ${blockCategory}
+// Variables to fill:
+// ${variablesDescription}
+//
+// Return ONLY a valid JSON object. Follow these rules for each variable type:
+//
+// 1. For "text" type:
+//    {"variableName": {"value": "your text content here"}}
+//
+// 2. For "image" type:
+//    {"variableName": {"value": null, "src": "descriptive image name", "alt": "alternative text"}}
+//
+// 3. For "link" type:
+//    {"variableName": {"value": null, "href": "url or #anchor", "label": "link text"}}
+//
+// Example response:
+// {
+//   "title": {"value": "Transform Your Business Today"},
+//   "logo": {"value": null, "src": "modern tech company logo", "alt": "Company Logo"},
+//   "navItem1": {"value": null, "href": "#about", "label": "About Us"},
+//   "navItem2": {"value": null, "href": "#services", "label": "Services"},
+//   "heroText": {"value": "We help businesses grow with innovative solutions"}
+// }
+//
+// Important:
+// - Generate content appropriate for ${blockCategory} blocks
+// - Make links meaningful and contextual
+// - Keep text concise and professional`;
+	const systemPrompt = `
+You are a content AND visual style generator for website blocks.
+
+Your task:
+- Generate content variables for the block
+- ALSO generate CSS design tokens based on the user's prompt
 
 Block type: ${blockCategory}
+
+=====================
+CONTENT VARIABLES
+=====================
 Variables to fill:
 ${variablesDescription}
 
-Return ONLY a valid JSON object. Follow these rules for each variable type:
-
+Follow these rules for content variables:
 1. For "text" type:
-   {"variableName": {"value": "your text content here"}}
+   {"variableName": {"value": "text"}}
 
 2. For "image" type:
-   {"variableName": {"value": null, "src": "descriptive image name", "alt": "alternative text"}}
+   {"variableName": {"value": null, "src": "descriptive image name", "alt": "alt text"}}
 
 3. For "link" type:
    {"variableName": {"value": null, "href": "url or #anchor", "label": "link text"}}
 
-Example response:
+=====================
+DESIGN VARIABLES (CSS)
+=====================
+You MUST also generate a "theme" object that overrides CSS variables.
+
+Allowed CSS variables to override:
+- --color-primary
+- --color-secondary
+- --color-accent
+- --color-background
+- --color-text
+- --font-sans
+- --radius-md
+- --shadow-md
+
+Rules for design variables:
+- Colors must be valid HEX values
+- Font must be a realistic web-safe or Google Font family
+- Design must match the user's intent, mood, and industry
+- Do NOT invent new CSS variables
+- Do NOT remove variables
+
+RESPONSE FORMAT:
+
+Return ONLY valid JSON.
+
+1. All content variables MUST be returned at the ROOT level
+2. Design tokens MUST be returned inside a "theme" object
+
+Example:
+
 {
-  "title": {"value": "Transform Your Business Today"},
-  "logo": {"value": null, "src": "modern tech company logo", "alt": "Company Logo"},
-  "navItem1": {"value": null, "href": "#about", "label": "About Us"},
-  "navItem2": {"value": null, "href": "#services", "label": "Services"},
-  "heroText": {"value": "We help businesses grow with innovative solutions"}
+  "title": { "value": "..." },
+  "subtitle": { "value": "..." },
+  "ctaButton": { "label": "...", "href": "#", "value": null },
+
+  "theme": {
+    "--color-primary": "#xxxxxx",
+    "--color-accent": "#xxxxxx"
+  }
 }
 
-Important: 
-- Generate content appropriate for ${blockCategory} blocks
-- Make links meaningful and contextual
-- Keep text concise and professional`;
+=====================
+DESIGN GUIDELINES
+=====================
+Examples:
+- SaaS / Startup → blue, purple, clean, modern
+- Coffee shop → warm browns, beige, cozy
+- Luxury brand → dark backgrounds, gold accents
+- Kids / playful → bright colors, rounded corners
+
+Keep content concise and professional.
+`;
 
 	const completion = await openai.chat.completions.create({
 		model: 'gpt-4o-mini',
