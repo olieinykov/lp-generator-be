@@ -1,5 +1,5 @@
-import { getPrompt, postPrompt, putPrompt } from './handlers';
-import { getPromptSchema, postPromptSchema, putPromptSchema } from './schema';
+import { getPrompt, postPrompt, putPrompt } from './handlers.js';
+import { getPromptSchema, postPromptSchema, putPromptSchema } from './schema.js';
 
 const routes = async (fastify) => {
 	fastify.get('/:promptId', {

@@ -28,7 +28,7 @@ fastify.register(templatesRoutes, { prefix: 'api/v1/templates' });
 fastify.register(usersRoutes, { prefix: 'api/v1/users' });
 fastify.register(authRoutes, { prefix: 'api/v1/auth' });
 fastify.register(sitesRoutes, { prefix: 'api/v1/sites' });
-fastify.register(promptRoutes, { prefix: 'api/v1/sites' });
+fastify.register(promptRoutes, { prefix: 'api/v1/prompts' });
 
 try {
 	await fastify.listen({

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
-import { db } from '../../db/connection';
-import { prompts } from '../../db/schema';
+import { db } from '../../db/connection.js';
+import { prompts } from '../../db/schema.js';
 
 export const getPrompt = async (request, reply) => {
 	try {
