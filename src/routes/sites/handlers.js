@@ -197,17 +197,183 @@ ${allHtml}
 	}
 };
 
-// Остальные функции (getAllSites, getOneSite, activateSite) остаются без изменений
-// ... [ВСТАВЬТЕ ИХ СЮДА БЕЗ ИЗМЕНЕНИЙ] ...
-
 export const getAllSites = async (request, reply) => {
-	// ... существующий код без изменений ...
+	try {
+		const {
+			page = 1,
+			limit = 20,
+			searchByName = '',
+			searchById = '',
+			sortBy = 'createdAt',
+			sortOrder = 'desc',
+			isActive,
+			createdBy,
+			updatedBy,
+			createdAtFrom,
+			createdAtTo,
+			updatedAtFrom,
+			updatedAtTo,
+			createdByUserId,
+			updatedByUserId,
+		} = request.query;
+
+		const parseDateFilter = (dateString) => {
+			if (!dateString) return null;
+			const date = new Date(dateString);
+			return isNaN(date.getTime()) ? null : date;
+		};
+
+		const createdAtFromDate = parseDateFilter(createdAtFrom);
+		const createdAtToDate = parseDateFilter(createdAtTo);
+		const updatedAtFromDate = parseDateFilter(updatedAtFrom);
+		const updatedAtToDate = parseDateFilter(updatedAtTo);
+
+		const offset = (page - 1) * limit;
+
+		const createdByProfile = alias(profiles, 'created_by_profile');
+		const updatedByProfile = alias(profiles, 'updated_by_profile');
+
+		const filters = [];
+
+		if (searchByName) filters.push(ilike(blocks.name, `%${searchByName}%`));
+		if (searchById) {
+			filters.push(sql`CAST(${blocks.id} AS TEXT) ILIKE ${'%' + searchById + '%'}`);
+		}
+		if (createdBy) filters.push(eq(blocks.createdBy, createdBy));
+		if (updatedBy) filters.push(eq(blocks.updatedBy, updatedBy));
+
+		if (createdAtFromDate) filters.push(gte(blocks.createdAt, createdAtFromDate));
+		if (createdAtToDate) filters.push(lte(blocks.createdAt, createdAtToDate));
+		if (updatedAtFromDate) filters.push(gte(blocks.updatedAt, updatedAtFromDate));
+		if (updatedAtToDate) filters.push(lte(blocks.updatedAt, updatedAtToDate));
+
+		if (createdByUserId) filters.push(lte(blocks.createdBy, createdByUserId));
+		if (updatedByUserId) filters.push(lte(blocks.updatedBy, updatedByUserId));
+
+		if (isActive === 'true') {
+			filters.push(eq(blocks.isActive, true));
+		} else if (isActive === 'false') {
+			filters.push(eq(blocks.isActive, false));
+		}
+
+		const order = (column) => (sortOrder === 'asc' ? asc(column) : desc(column));
+
+		const query = db
+			.select({
+				id: sites.id,
+				name: sites.name,
+				isActive: sites.isActive,
+				archiveUrl: sites.archiveUrl,
+				definition: sites.definition,
+				createdAt: sites.createdAt,
+				updatedAt: sites.updatedAt,
+				promptTokens: sites.promptTokens,
+				completionTokens: sites.completionTokens,
+				totalTokens: sites.totalTokens,
+				createdByEmail: createdByProfile.email,
+				createdByUsername: createdByProfile.username,
+				updatedByEmail: updatedByProfile.email,
+				updatedByUsername: updatedByProfile.username,
+			})
+			.from(sites)
+			.leftJoin(createdByProfile, eq(sites.createdBy, createdByProfile.userId))
+			.leftJoin(updatedByProfile, eq(sites.updatedBy, updatedByProfile.userId))
+			.where(filters.length ? and(...filters) : undefined)
+			.orderBy(order(sites[sortBy]))
+			.limit(limit)
+			.offset(offset);
+
+		const data = await query;
+
+		const [{ count: totalCount }] = await db
+			.select({ count: count() })
+			.from(sites)
+			.where(filters.length ? and(...filters) : undefined);
+
+		return reply.code(200).send({
+			success: true,
+			data,
+			pagination: {
+				page: Number(page),
+				limit: Number(limit),
+				totalCount,
+				totalPages: Math.ceil(totalCount / limit),
+				hasNext: page < Math.ceil(totalCount / limit),
+				hasPrev: page > 1,
+			},
+		});
+	} catch (error) {
+		reply.code(400).send({
+			success: false,
+			error: error.message,
+		});
+	}
 };
 
 export const getOneSite = async (request, reply) => {
-	// ... существующий код без изменений ...
-};
+	try {
+		const { siteId } = request.params;
 
+		const [site] = await db
+			.select()
+			.from(sites)
+			.where(eq(sites.id, parseInt(siteId)));
+
+		const response = await fetch(site.archiveUrl);
+		if (!response.ok) {
+			throw new Error(`Failed to download archive: ${response.status}`);
+		}
+		const responseArrayBuffer = await response.arrayBuffer();
+		const zip = await JSZip.loadAsync(responseArrayBuffer);
+		const previewFile = zip.file('index.html');
+		let preview;
+		if (previewFile) {
+			preview = await previewFile.async('string');
+		}
+
+		reply.send({
+			success: true,
+			data: {
+				...site,
+				preview,
+			},
+		});
+	} catch (error) {
+		reply.code(500).send({
+			success: false,
+			error: error.message,
+		});
+	}
+};
 export const activateSite = async (request, reply) => {
-	// ... существующий код без изменений ...
+	try {
+		const { siteId } = request.params;
+
+		const [existing] = await db
+			.select()
+			.from(sites)
+			.where(eq(sites.id, Number(siteId)));
+
+		if (!existing) {
+			return reply.code(404).send({ success: false, error: 'Site not found' });
+		}
+
+		const [updatedSite] = await db
+			.update(sites)
+			.set({
+				isDraft: false,
+			})
+			.where(eq(sites.id, Number(siteId)))
+			.returning();
+
+		reply.send({
+			success: true,
+			data: updatedSite,
+		});
+	} catch (error) {
+		reply.code(500).send({
+			success: false,
+			error: error.message,
+		});
+	}
 };

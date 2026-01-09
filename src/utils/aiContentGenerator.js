@@ -33,37 +33,6 @@ export async function generateAIContent(prompt, variables, blockCategory) {
 	const variablesDescription = variables
 		.map((v) => `- ${v.name} (type: ${v.type}, required: ${v.required})`)
 		.join('\n');
-
-// 	const systemPrompt = `You are a content generator for website blocks. Generate realistic, professional content based on the user's request.
-//
-// Block type: ${blockCategory}
-// Variables to fill:
-// ${variablesDescription}
-//
-// Return ONLY a valid JSON object. Follow these rules for each variable type:
-//
-// 1. For "text" type:
-//    {"variableName": {"value": "your text content here"}}
-//
-// 2. For "image" type:
-//    {"variableName": {"value": null, "src": "descriptive image name", "alt": "alternative text"}}
-//
-// 3. For "link" type:
-//    {"variableName": {"value": null, "href": "url or #anchor", "label": "link text"}}
-//
-// Example response:
-// {
-//   "title": {"value": "Transform Your Business Today"},
-//   "logo": {"value": null, "src": "modern tech company logo", "alt": "Company Logo"},
-//   "navItem1": {"value": null, "href": "#about", "label": "About Us"},
-//   "navItem2": {"value": null, "href": "#services", "label": "Services"},
-//   "heroText": {"value": "We help businesses grow with innovative solutions"}
-// }
-//
-// Important:
-// - Generate content appropriate for ${blockCategory} blocks
-// - Make links meaningful and contextual
-// - Keep text concise and professional`;
 	const systemPrompt = `
 You are a content AND visual style generator for website blocks.
 
