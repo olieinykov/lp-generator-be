@@ -31,25 +31,20 @@ function applyThemeToCss(originalCss, themeVariables) {
 
 	let updatedCss = originalCss;
 
-	// Ищем :root блок
 	const rootMatch = updatedCss.match(/:root\s*\{[\s\S]*?\}/);
 
 	if (rootMatch) {
-		// Обновляем переменные в :root
 		Object.entries(themeVariables).forEach(([varName, value]) => {
 			const regex = new RegExp(`${varName}\\s*:[^;]*;`, 'g');
 			const newDeclaration = `${varName}: ${value};`;
 
 			if (updatedCss.includes(varName)) {
-				// Заменяем существующую переменную
 				updatedCss = updatedCss.replace(regex, newDeclaration);
 			} else {
-				// Добавляем новую переменную внутрь :root
 				updatedCss = updatedCss.replace(/:root\s*\{/, `:root {\n  ${newDeclaration}`);
 			}
 		});
 	} else {
-		// Если нет :root, добавляем его в начало
 		let newRoot = ':root {\n';
 		Object.entries(themeVariables).forEach(([varName, value]) => {
 			newRoot += `  ${varName}: ${value};\n`;
@@ -78,7 +73,6 @@ export const createSite = async (request, reply) => {
 		let allHtml = '';
 		let tokensInfo;
 
-		// Собираем все CSS переменные из всех блоков
 		let allThemeVariables = {};
 
 		for (const blockDef of template.definition.blocks) {
@@ -99,26 +93,21 @@ export const createSite = async (request, reply) => {
 				tokensInfo = tokens;
 				console.log('AI Content:', JSON.stringify(aiContent, null, 2));
 
-				// Извлекаем theme из AI ответа (если есть)
 				const themeVariables = aiContent.theme || {};
 
-				// Объединяем theme переменные (последний блок перезаписывает предыдущие)
 				allThemeVariables = { ...allThemeVariables, ...themeVariables };
 
-				// Удаляем theme из aiContent, чтобы fillVariables не пыталась его обработать
 				const contentForHtml = { ...aiContent };
 				delete contentForHtml.theme;
 
 				const filledHtml = fillVariables(blockData.html, contentForHtml);
 				allHtml += filledHtml + '\n';
 
-				// Применяем theme к CSS этого блока
 				const updatedCss = applyThemeToCss(blockData.css, themeVariables);
 				allStyles += updatedCss + '\n';
 			}
 		}
 
-		// Если есть theme переменные, но не было :root, добавляем их в начало
 		let finalStyles = '';
 		if (Object.keys(allThemeVariables).length > 0) {
 			finalStyles += ':root {\n';
