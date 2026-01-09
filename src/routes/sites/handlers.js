@@ -179,7 +179,13 @@ ${allHtml}
 			})
 			.returning();
 
-		return reply.type('text/html').send(generatedSite);
+		return reply.status(201).send({
+			data: {
+				...siteData,
+				preview: generatedSite,
+			},
+			success: true,
+		});
 	} catch (error) {
 		console.log('error', error);
 		return reply.status(500).send({ error: error.message });
