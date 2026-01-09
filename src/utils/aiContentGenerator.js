@@ -128,7 +128,6 @@ Keep content concise and professional.
 	});
 	const content = completion.choices[0].message.content;
 	const jsonMatch = content.match(/\{[\s\S]*\}/);
-	console.log('jsonMatch', jsonMatch);
 	if (!jsonMatch) {
 		throw new Error('AI did not return valid JSON');
 	}

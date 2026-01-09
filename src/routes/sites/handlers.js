@@ -6,6 +6,12 @@ import { alias } from 'drizzle-orm/pg-core';
 import { generateAIContent } from '../../utils/aiContentGenerator.js';
 import { downloadAndUnzipBlock } from '../../utils/zipHandler.js';
 import JSZip from 'jszip';
+import { PRICE_FOR_PROMPTS } from '../../config/constants.js';
+
+function cutNumber(number, amountAfterDot) {
+	const factor = 10 ** amountAfterDot;
+	return Math.floor(number * factor) / factor;
+}
 
 function fillVariables(html, aiContent) {
 	let filledHtml = html;
@@ -157,6 +163,11 @@ ${allHtml}
 			throw error;
 		}
 
+		const inputPrice = tokensInfo.promptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
+		const outputPrice = tokensInfo.completionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+
+		const totalPrice = inputPrice + outputPrice;
+
 		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(fileName);
 
 		console.log('urlData.publicUrl', urlData.publicUrl);
@@ -176,6 +187,9 @@ ${allHtml}
 				totalTokens: tokensInfo.totalTokens,
 				completionTokens: tokensInfo.completionTokens,
 				promptTokens: tokensInfo.promptTokens,
+				inputUsdPrice: cutNumber(inputPrice, 6),
+				outputUsdPrice: cutNumber(outputPrice, 6),
+				totalUsdPrice: cutNumber(totalPrice, 6),
 				createdBy: '67366103-2833-41a8-aea2-10d589a0705c',
 				updatedBy: '67366103-2833-41a8-aea2-10d589a0705c',
 			})
