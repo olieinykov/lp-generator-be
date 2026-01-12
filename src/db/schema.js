@@ -77,9 +77,9 @@ export const sites = pgTable('sites', {
 	promptTokens: integer('prompt_tokens'),
 	completionTokens: integer('completion_tokens'),
 	totalTokens: integer('total_tokens'),
-	//inputUsdPrice: decimal('input_usd_price'),
-	//outputUsdPrice: decimal('output_usd_price'),
-	//totalUsdPrice: decimal('total_usd_price'),
+	inputUsdPrice: decimal('input_usd_price'),
+	outputUsdPrice: decimal('output_usd_price'),
+	totalUsdPrice: decimal('total_usd_price'),
 });
 
 export const prompts = pgTable('prompts', {
