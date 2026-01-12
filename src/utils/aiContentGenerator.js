@@ -48,6 +48,19 @@ Your task:
 Block type: ${blockCategory}
 
 =====================
+CONTRAST & READABILITY RULES (CRITICAL)
+=====================
+You MUST ensure high contrast between text and background:
+1. If the user wants a DARK THEME:
+   - --color-background MUST be dark (e.g., #000000, #1A1A1A)
+   - --color-text MUST be very light (e.g., #FFFFFF, #F5F5F5)
+   - --color-primary/--color-accent must be vibrant but readable on dark.
+2. If the user wants a LIGHT THEME:
+   - --color-background MUST be light (e.g., #FFFFFF, #F8F9FA)
+   - --color-text MUST be dark (e.g., #1A1A1A, #333333)
+3. Ensure WCAG AAA compliance: the contrast ratio should be high enough for perfect readability.
+
+=====================
 CONTENT VARIABLES
 =====================
 Variables to fill:

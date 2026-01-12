@@ -9,6 +9,7 @@ import {
 	text,
 	jsonb,
 	integer,
+	decimal,
 } from 'drizzle-orm/pg-core';
 
 export const profiles = pgTable('profiles', {
