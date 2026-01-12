@@ -62,6 +62,27 @@ function applyThemeToCss(originalCss, themeVariables) {
 	return updatedCss;
 }
 
+function generateMetaTags(metaObject) {
+	if (!metaObject) return '';
+
+	return Object.entries(metaObject)
+		.map(([key, value]) => {
+			if (!value) return '';
+			if (key.toLowerCase() === 'title') {
+				return `<title>${value}</title>`;
+			}
+			if (key.toLowerCase() === 'canonical') {
+				return `<link rel="canonical" href="${value}" />`;
+			}
+			if (key.startsWith('og_')) {
+				const property = key.replace('_', ':');
+				return `<meta property="${property}" content="${value}">`;
+			}
+			return `<meta name="${key}" content="${value}">`;
+		})
+		.join('\n  ');
+}
+
 export const createSite = async (request, reply) => {
 	try {
 		const { prompt, templatesIds, isActive, name, trafficSource, country, language } =
@@ -80,6 +101,7 @@ export const createSite = async (request, reply) => {
 		let tokensInfo;
 
 		let allThemeVariables = {};
+		let metaTags = '';
 
 		for (const blockDef of template.definition.blocks) {
 			const blocksOfType = await db
@@ -113,6 +135,7 @@ export const createSite = async (request, reply) => {
 
 				const updatedCss = applyThemeToCss(blockData.css, themeVariables);
 				allStyles += updatedCss + '\n';
+				metaTags = generateMetaTags(aiContent.meta);
 			}
 		}
 
@@ -127,11 +150,11 @@ export const createSite = async (request, reply) => {
 		finalStyles += allStyles;
 
 		const generatedSite = `<!DOCTYPE html>
-<html lang="en">
+<html lang="${language}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Generated Site</title>
+  ${metaTags}
   <style>
     * {
       margin: 0;

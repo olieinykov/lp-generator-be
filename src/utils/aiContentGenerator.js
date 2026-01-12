@@ -42,6 +42,7 @@ STRICT LOCALIZATION RULES:
 
 Your task:
 - Generate content variables for the block
+- Generate SEO Meta-tags (title, description, keywords) tailored to the ${country}
 - ALSO generate CSS design tokens based on the user's prompt
 
 Block type: ${blockCategory}
@@ -61,6 +62,14 @@ Follow these rules for content variables:
 
 3. For "link" type:
    {"variableName": {"value": null, "href": "url or #anchor", "label": "link text"}}
+
+=====================
+SEO & LOCALIZATION
+=====================
+You MUST generate a "meta" object. 
+- Use local SEO practices for ${country}.
+- Include relevant keywords that people in ${country} would use for this industry.
+- Format any prices/currencies according to ${country} standards (e.g., $100 for USA, 100 € for Germany, etc.).
 
 =====================
 DESIGN VARIABLES (CSS)
@@ -96,6 +105,12 @@ All text values must be in ${language}.
 Example:
 
 {
+  "meta": {
+    "title": "SEO title for ${country}",
+    "description": "SEO description",
+    "keywords": "keyword1, keyword2, local-keyword",
+    "og_locale": "appropriate locale code for ${country}"
+  },
   "title": { "value": "..." },
   "subtitle": { "value": "..." },
   "ctaButton": { "label": "...", "href": "#", "value": null },
