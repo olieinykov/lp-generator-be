@@ -7,6 +7,7 @@ import { generateAIContent } from '../../utils/aiContentGenerator.js';
 import { downloadAndUnzipBlock } from '../../utils/zipHandler.js';
 import JSZip from 'jszip';
 import { PRICE_FOR_PROMPTS } from '../../config/constants.js';
+import slugify from "slugify";
 
 function cutNumber(number, amountAfterDot) {
 	const factor = 10 ** amountAfterDot;
@@ -207,8 +208,13 @@ ${allHtml}
 		zip.addFile('index.html', Buffer.from(generatedSite, 'utf8'));
 
 		const zipBuffer = zip.toBuffer();
-		const fileName = `site-${name}-${new Date().getTime()}.zip`;
-		const { data, error } = await supabase.storage.from('sites').upload(fileName, zipBuffer, {
+
+		const safeName = slugify(`site-${name}-${new Date().getTime()}.zip`, {
+			lower: true,
+			strict: true,
+		});
+
+		const { error } = await supabase.storage.from('sites').upload(safeName, zipBuffer, {
 			contentType: 'application/zip',
 			upsert: false,
 		});
@@ -222,7 +228,7 @@ ${allHtml}
 
 		const totalPrice = inputPrice + outputPrice;
 
-		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(fileName);
+		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(safeName);
 
 		console.log('urlData.publicUrl', urlData.publicUrl);
 
@@ -335,6 +341,9 @@ export const getAllSites = async (request, reply) => {
 				promptTokens: sites.promptTokens,
 				completionTokens: sites.completionTokens,
 				totalTokens: sites.totalTokens,
+				totalUsdPrice: sites.totalUsdPrice,
+				inputUsdPrice: sites.inputUsdPrice,
+				outputUsdPrice: sites.outputUsdPrice,
 				createdByEmail: createdByProfile.email,
 				createdByUsername: createdByProfile.username,
 				updatedByEmail: updatedByProfile.email,
@@ -523,8 +532,6 @@ export const regenerateSite = async (request, reply) => {
 			tokensInfo.totalCompletionTokens += tokens.completionTokens;
 			tokensInfo.totalTokens += tokens.totalTokens;
 
-			console.log('AI Content:', JSON.stringify(aiContent, null, 2));
-
 			const themeVariables = aiContent.theme || {};
 			allThemeVariables = { ...allThemeVariables, ...themeVariables };
 
@@ -578,8 +585,12 @@ ${allHtml}
 		zip.addFile('index.html', Buffer.from(generatedSite, 'utf8'));
 
 		const zipBuffer = zip.toBuffer();
-		const fileName = `site-${name}-${new Date().getTime()}.zip`;
-		const { data, error } = await supabase.storage.from('sites').upload(fileName, zipBuffer, {
+		const safeName = slugify(`site-${name}-${new Date().getTime()}.zip`, {
+			lower: true,
+			strict: true,
+		});
+
+		const { error } = await supabase.storage.from('sites').upload(safeName, zipBuffer, {
 			contentType: 'application/zip',
 			upsert: false,
 		});
@@ -593,9 +604,7 @@ ${allHtml}
 
 		const totalPrice = inputPrice + outputPrice;
 
-		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(fileName);
-
-		console.log('urlData.publicUrl', urlData.publicUrl);
+		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(safeName);
 
 		const [siteData] = await db
 			.update(sites)
