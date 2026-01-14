@@ -98,46 +98,77 @@ export const createSite = async (request, reply) => {
 
 		let allStyles = '';
 		let allHtml = '';
-		let tokensInfo;
+		let tokensInfo = {
+			totalPromptTokens: 0,
+			totalCompletionTokens: 0,
+			totalTokens: 0,
+		};
 
 		let allThemeVariables = {};
 		let metaTags = '';
 
-		for (const blockDef of template.definition.blocks) {
-			const blocksOfType = await db
-				.select()
-				.from(blocks)
-				.where(eq(blocks.category, blockDef.type));
+		const blockPromises = template.definition.blocks.map(async (blockDef) => {
+			let randomBlockId = null;
+			try {
+				const blocksOfType = await db
+					.select()
+					.from(blocks)
+					.where(eq(blocks.category, blockDef.type));
 
-			if (blocksOfType.length > 0) {
-				const randomBlock = blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
-				const blockData = await downloadAndUnzipBlock(randomBlock.archiveUrl);
+				if (blocksOfType.length > 0) {
+					const randomBlock =
+						blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
+					randomBlockId = randomBlock.id;
+					const blockData = await downloadAndUnzipBlock(randomBlock.archiveUrl);
 
-				const [aiContent, tokens] = await generateAIContent(
-					prompt,
-					blockData.definition.variables,
-					blockDef.type,
-					country,
-					language,
-				);
-				tokensInfo = tokens;
-				console.log('AI Content:', JSON.stringify(aiContent, null, 2));
-
-				const themeVariables = aiContent.theme || {};
-
-				allThemeVariables = { ...allThemeVariables, ...themeVariables };
-
-				const contentForHtml = { ...aiContent };
-				delete contentForHtml.theme;
-
-				const filledHtml = fillVariables(blockData.html, contentForHtml);
-				allHtml += filledHtml + '\n';
-
-				const updatedCss = applyThemeToCss(blockData.css, themeVariables);
-				allStyles += updatedCss + '\n';
-				metaTags = generateMetaTags(aiContent.meta);
+					const [aiContent, tokens] = await generateAIContent(
+						prompt,
+						blockData.definition.variables,
+						blockDef.type,
+						country,
+						language,
+					);
+					return {
+						aiContent,
+						tokens,
+						blockData,
+					};
+				}
+			} catch (err) {
+				throw new Error(`Block generation with id - ${randomBlockId} was failed `);
 			}
-		}
+		});
+		const blockResults = await Promise.allSettled(blockPromises);
+		blockResults.forEach((result) => {
+			if (result.status === 'rejected') {
+				console.log(result.reason);
+				return;
+			}
+			const blockResult = result.value;
+			if (!blockResult) return;
+			const { aiContent, tokens, blockData } = blockResult;
+
+			tokensInfo.totalPromptTokens += tokens.promptTokens;
+			tokensInfo.totalCompletionTokens += tokens.completionTokens;
+			tokensInfo.totalTokens += tokens.totalTokens;
+
+			console.log('AI Content:', JSON.stringify(aiContent, null, 2));
+
+			const themeVariables = aiContent.theme || {};
+			allThemeVariables = { ...allThemeVariables, ...themeVariables };
+
+			const contentForHtml = { ...aiContent };
+			delete contentForHtml.theme;
+			delete contentForHtml.meta;
+
+			const filledHtml = fillVariables(blockData.html, contentForHtml);
+			allHtml += filledHtml + '\n';
+
+			const updatedCss = applyThemeToCss(blockData.css, themeVariables);
+			allStyles += updatedCss + '\n';
+
+			metaTags = generateMetaTags(aiContent.meta);
+		});
 
 		let finalStyles = '';
 		if (Object.keys(allThemeVariables).length > 0) {
@@ -186,8 +217,8 @@ ${allHtml}
 			throw error;
 		}
 
-		const inputPrice = tokensInfo.promptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
-		const outputPrice = tokensInfo.completionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
+		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
 
 		const totalPrice = inputPrice + outputPrice;
 
@@ -208,8 +239,8 @@ ${allHtml}
 				definition: template.id,
 				prompt: prompt,
 				totalTokens: tokensInfo.totalTokens,
-				completionTokens: tokensInfo.completionTokens,
-				promptTokens: tokensInfo.promptTokens,
+				completionTokens: tokensInfo.totalCompletionTokens,
+				promptTokens: tokensInfo.totalPromptTokens,
 				inputUsdPrice: cutNumber(inputPrice, 6),
 				outputUsdPrice: cutNumber(outputPrice, 6),
 				totalUsdPrice: cutNumber(totalPrice, 6),
