@@ -17,13 +17,26 @@ function cutNumber(number, amountAfterDot) {
 	return Math.floor(number * factor) / factor;
 }
 
-function fillVariables(html, aiContent) {
-	let filledHtml = html;
+function fillVariables(blockResult, theme) {
+	const { aiContent, blockData } = blockResult;
+	let filledHtml = blockData.html;
+
+	let childHtml = '';
+	let childStyles = '';
+
+	if (aiContent.childBlock) {
+		const childRender = fillVariables(aiContent.childBlock, theme);
+		childHtml = childRender.html;
+		childStyles = childRender.css;
+	}
 
 	function processObject(obj, path) {
 		Object.keys(obj).forEach((key) => {
+			if (key === 'childBlock') return;
+
 			const currentPath = `${path}.${key}`;
 			const val = obj[key];
+
 			if (val !== null && typeof val === 'object') {
 				processObject(val, currentPath);
 			} else if (val !== null) {
@@ -34,7 +47,20 @@ function fillVariables(html, aiContent) {
 	}
 	processObject(aiContent, 'variables');
 
-	return filledHtml;
+	if (childHtml) {
+		if (filledHtml.includes('${variables.childContent}')) {
+			filledHtml = filledHtml.replace('${variables.childContent}', childHtml);
+		} else {
+			filledHtml += '\n' + childHtml;
+		}
+	}
+
+	const currentCss = applyThemeToCss(blockData.css, theme);
+
+	return {
+		html: filledHtml,
+		css: currentCss + '\n' + childStyles,
+	};
 }
 
 function applyThemeToCss(originalCss, themeVariables) {
@@ -127,6 +153,55 @@ export const createSite = async (request, reply) => {
 			totalTokens: 0,
 		};
 		const createdPages = [];
+
+		async function generateBlock(blockDef, currentPage, blockIndex, prompt, country, language) {
+			let randomBlockId = null;
+			try {
+				const blocksOfType = await db
+					.select()
+					.from(blocks)
+					.where(eq(blocks.category, blockDef.type));
+
+				if (blocksOfType.length === 0) return null;
+
+				const randomBlock = blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
+				randomBlockId = randomBlock.id;
+				const blockData = await downloadAndUnzipBlock(randomBlock.archiveUrl);
+
+				const [aiContent, tokens] = await generateAIContent(
+					prompt,
+					blockData.definition.variables,
+					blockDef.type,
+					country,
+					language,
+					currentPage,
+					blockIndex === 0,
+				);
+
+				if (blockDef.childrenBlock) {
+					const childResult = await generateBlock(
+						blockDef.childrenBlock,
+						currentPage,
+						-1,
+						prompt,
+						country,
+						language,
+					);
+					aiContent.childBlock = childResult;
+				}
+
+				return {
+					aiContent,
+					tokens,
+					blockData,
+				};
+			} catch (err) {
+				throw new Error(
+					`Block generation with id - ${randomBlockId} failed: ${err.message}`,
+				);
+			}
+		}
+
 		const pagesPromises = template.definition.pages.map((page, pageIndex) => {
 			const currentPage =
 				pageIndex === 0
@@ -134,37 +209,7 @@ export const createSite = async (request, reply) => {
 					: pageNames.splice(Math.floor(Math.random() * pageNames.length), 1)[0];
 			createdPages.push(currentPage);
 			const pagePromises = page.map(async (blockDef, blockIndex) => {
-				let randomBlockId = null;
-				try {
-					const blocksOfType = await db
-						.select()
-						.from(blocks)
-						.where(eq(blocks.category, blockDef.type));
-
-					if (blocksOfType.length > 0) {
-						const randomBlock =
-							blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
-						randomBlockId = randomBlock.id;
-						const blockData = await downloadAndUnzipBlock(randomBlock.archiveUrl);
-
-						const [aiContent, tokens] = await generateAIContent(
-							prompt,
-							blockData.definition.variables,
-							blockDef.type,
-							country,
-							language,
-							currentPage,
-							blockIndex === 0,
-						);
-						return {
-							aiContent,
-							tokens,
-							blockData,
-						};
-					}
-				} catch (err) {
-					throw new Error(`Block generation with id - ${randomBlockId} was failed `);
-				}
+				return generateBlock(blockDef, currentPage, blockIndex, prompt, country, language);
 			});
 			return Promise.allSettled(pagePromises);
 		});
@@ -229,21 +274,19 @@ export const createSite = async (request, reply) => {
 			}
 			const reBlock = result.value;
 			if (!reBlock) return;
-			const { aiContent, tokens, blockData, category } = reBlock;
+			const { tokens, category } = reBlock;
 
 			tokensInfo.totalPromptTokens += tokens.promptTokens;
 			tokensInfo.totalCompletionTokens += tokens.completionTokens;
 			tokensInfo.totalTokens += tokens.totalTokens;
 
-			const contentForHtml = { ...aiContent };
-			const filledHtml = fillVariables(blockData.html, contentForHtml);
-			const updatedCss = applyThemeToCss(blockData.css, themeVariables.theme);
+			const rendered = fillVariables(reBlock, themeVariables.theme);
 			if (category == 'header') {
-				reusableHeader.html += filledHtml + '\n';
-				reusableHeader.css += updatedCss + '\n';
+				reusableHeader.html += rendered.html + '\n';
+				reusableHeader.css += rendered.css + '\n';
 			} else {
-				reusableFooter.html += filledHtml + '\n';
-				reusableFooter.css += updatedCss + '\n';
+				reusableFooter.html += rendered.html + '\n';
+				reusableFooter.css += rendered.css + '\n';
 			}
 		});
 
@@ -262,27 +305,26 @@ export const createSite = async (request, reply) => {
 				}
 				const blockResult = result.value;
 				if (!blockResult) return;
-				const { aiContent, tokens, blockData } = blockResult;
+				const { aiContent } = blockResult;
+				const collectTokens = (res) => {
+					tokensInfo.totalPromptTokens += res.tokens.promptTokens;
+					tokensInfo.totalCompletionTokens += res.tokens.completionTokens;
+					tokensInfo.totalTokens += res.tokens.totalTokens;
+					if (res.aiContent.childBlock) collectTokens(res.aiContent.childBlock);
+				};
+				collectTokens(blockResult);
 
-				tokensInfo.totalPromptTokens += tokens.promptTokens;
-				tokensInfo.totalCompletionTokens += tokens.completionTokens;
-				tokensInfo.totalTokens += tokens.totalTokens;
-
-				const contentForHtml = { ...aiContent };
-
-				const filledHtml = fillVariables(blockData.html, contentForHtml);
+				const renderedBlock = fillVariables(blockResult, themeVariables.theme);
 				if (resultIdx === 0) {
 					pageHtml += reusableHeader.html;
 					pageStyles += reusableHeader.css;
 				}
-				pageHtml += filledHtml + '\n';
+				pageHtml += renderedBlock.html + '\n';
+				pageStyles += renderedBlock.css + '\n';
 				if (resultIdx === pageResult.length - 1) {
 					pageHtml += reusableFooter.html;
 					pageStyles += reusableFooter.css;
 				}
-
-				const updatedCss = applyThemeToCss(blockData.css, themeVariables.theme);
-				pageStyles += updatedCss + '\n';
 
 				if (aiContent.meta) {
 					pageMetaTags = generateMetaTags(aiContent.meta);
