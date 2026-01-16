@@ -3,7 +3,11 @@ import { blocks, templates, sites, profiles } from '../../db/schema.js';
 import { and, asc, count, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
 import AdmZip from 'adm-zip';
 import { alias } from 'drizzle-orm/pg-core';
-import { generateAIContent } from '../../utils/aiContentGenerator.js';
+import {
+	generateAIContent,
+	generateReusableBlocks,
+	generateStyles,
+} from '../../utils/aiContentGenerator.js';
 import { downloadAndUnzipBlock } from '../../utils/zipHandler.js';
 import JSZip from 'jszip';
 import { PRICE_FOR_PROMPTS } from '../../config/constants.js';
@@ -16,16 +20,19 @@ function cutNumber(number, amountAfterDot) {
 function fillVariables(html, aiContent) {
 	let filledHtml = html;
 
-	Object.keys(aiContent).forEach((varName) => {
-		const varData = aiContent[varName];
-
-		Object.keys(varData).forEach((prop) => {
-			if (varData[prop] !== null) {
-				const placeholder = `\${variables.${varName}.${prop}}`;
-				filledHtml = filledHtml.replaceAll(placeholder, varData[prop]);
+	function processObject(obj, path) {
+		Object.keys(obj).forEach((key) => {
+			const currentPath = `${path}.${key}`;
+			const val = obj[key];
+			if (val !== null && typeof val === 'object') {
+				processObject(val, currentPath);
+			} else if (val !== null) {
+				const placeholder = `\${${currentPath}}`;
+				filledHtml = filledHtml.replaceAll(placeholder, val);
 			}
 		});
-	});
+	}
+	processObject(aiContent, 'variables');
 
 	return filledHtml;
 }
@@ -83,6 +90,14 @@ function generateMetaTags(metaObject) {
 		.join('\n  ');
 }
 
+const toLowerCamelCase = (str) => {
+	return str
+		.toLowerCase()
+		.split(' ')
+		.map((word, index) => (index === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1)))
+		.join('');
+};
+
 export const createSite = async (request, reply) => {
 	try {
 		const { prompt, templatesIds, isActive, name, trafficSource, country, language } =
@@ -92,119 +107,227 @@ export const createSite = async (request, reply) => {
 			where: eq(templates.id, templatesIds[0]),
 		});
 
-		if (!template || !template.definition?.blocks) {
+		const pageNames = [
+			'About Us',
+			'Services',
+			'Portfolio',
+			'Pricing',
+			'Testimonials',
+			'Contact Us',
+			'FAQ',
+		];
+
+		if (!template || !template.definition?.pages) {
 			return reply.status(404).send({ error: 'Template not found' });
 		}
 
-		let allStyles = '';
-		let allHtml = '';
 		let tokensInfo = {
 			totalPromptTokens: 0,
 			totalCompletionTokens: 0,
 			totalTokens: 0,
 		};
+		const createdPages = [];
+		const pagesPromises = template.definition.pages.map((page, pageIndex) => {
+			const currentPage =
+				pageIndex === 0
+					? 'Main Page'
+					: pageNames.splice(Math.floor(Math.random() * pageNames.length), 1)[0];
+			createdPages.push(currentPage);
+			const pagePromises = page.map(async (blockDef, blockIndex) => {
+				let randomBlockId = null;
+				try {
+					const blocksOfType = await db
+						.select()
+						.from(blocks)
+						.where(eq(blocks.category, blockDef.type));
 
-		let allThemeVariables = {};
-		let metaTags = '';
+					if (blocksOfType.length > 0) {
+						const randomBlock =
+							blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
+						randomBlockId = randomBlock.id;
+						const blockData = await downloadAndUnzipBlock(randomBlock.archiveUrl);
 
-		const blockPromises = template.definition.blocks.map(async (blockDef) => {
-			let randomBlockId = null;
-			try {
-				const blocksOfType = await db
-					.select()
-					.from(blocks)
-					.where(eq(blocks.category, blockDef.type));
-
-				if (blocksOfType.length > 0) {
-					const randomBlock =
-						blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
-					randomBlockId = randomBlock.id;
-					const blockData = await downloadAndUnzipBlock(randomBlock.archiveUrl);
-
-					const [aiContent, tokens] = await generateAIContent(
-						prompt,
-						blockData.definition.variables,
-						blockDef.type,
-						country,
-						language,
-					);
-					return {
-						aiContent,
-						tokens,
-						blockData,
-					};
+						const [aiContent, tokens] = await generateAIContent(
+							prompt,
+							blockData.definition.variables,
+							blockDef.type,
+							country,
+							language,
+							currentPage,
+							blockIndex === 0,
+						);
+						return {
+							aiContent,
+							tokens,
+							blockData,
+						};
+					}
+				} catch (err) {
+					throw new Error(`Block generation with id - ${randomBlockId} was failed `);
 				}
-			} catch (err) {
-				throw new Error(`Block generation with id - ${randomBlockId} was failed `);
-			}
+			});
+			return Promise.allSettled(pagePromises);
 		});
-		const blockResults = await Promise.allSettled(blockPromises);
-		blockResults.forEach((result) => {
+		const pagesResult = await Promise.all(pagesPromises);
+		const reusableBlocksPromises = template.definition.reusableBlocks.map(
+			async (reusableBlock) => {
+				try {
+					let selectedBlock;
+					if (reusableBlock.type == 'header') {
+						selectedBlock = await db.query.blocks.findFirst({
+							where: eq(blocks.id, 77),
+						});
+					} else {
+						const blocksOfType = await db
+							.select()
+							.from(blocks)
+							.where(eq(blocks.category, reusableBlock.type));
+
+						if (blocksOfType.length > 0) {
+							selectedBlock =
+								blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
+						}
+					}
+					if (selectedBlock && selectedBlock.archiveUrl) {
+						const blockData = await downloadAndUnzipBlock(selectedBlock.archiveUrl);
+						const [aiContent, tokens] = await generateReusableBlocks(
+							prompt,
+							blockData.definition.variables,
+							reusableBlock.type,
+							country,
+							language,
+							createdPages,
+						);
+						return {
+							aiContent,
+							tokens,
+							blockData,
+							category: selectedBlock.category,
+						};
+					}
+				} catch (err) {
+					console.log(err);
+				}
+			},
+		);
+		const reusableBlocksPromise = await Promise.allSettled(reusableBlocksPromises);
+		let reusableHeader = {
+			html: '',
+			css: '',
+		};
+		let reusableFooter = {
+			html: '',
+			css: '',
+		};
+
+		const [themeVariables, themeTokens] = await generateStyles(prompt);
+
+		reusableBlocksPromise.forEach((result) => {
 			if (result.status === 'rejected') {
 				console.log(result.reason);
 				return;
 			}
-			const blockResult = result.value;
-			if (!blockResult) return;
-			const { aiContent, tokens, blockData } = blockResult;
+			const reBlock = result.value;
+			if (!reBlock) return;
+			const { aiContent, tokens, blockData, category } = reBlock;
 
 			tokensInfo.totalPromptTokens += tokens.promptTokens;
 			tokensInfo.totalCompletionTokens += tokens.completionTokens;
 			tokensInfo.totalTokens += tokens.totalTokens;
 
-			console.log('AI Content:', JSON.stringify(aiContent, null, 2));
-
-			const themeVariables = aiContent.theme || {};
-			allThemeVariables = { ...allThemeVariables, ...themeVariables };
-
 			const contentForHtml = { ...aiContent };
-			delete contentForHtml.theme;
-			delete contentForHtml.meta;
-
 			const filledHtml = fillVariables(blockData.html, contentForHtml);
-			allHtml += filledHtml + '\n';
-
-			const updatedCss = applyThemeToCss(blockData.css, themeVariables);
-			allStyles += updatedCss + '\n';
-
-			metaTags = generateMetaTags(aiContent.meta);
+			const updatedCss = applyThemeToCss(blockData.css, themeVariables.theme);
+			if (category == 'header') {
+				reusableHeader.html += filledHtml + '\n';
+				reusableHeader.css += updatedCss + '\n';
+			} else {
+				reusableFooter.html += filledHtml + '\n';
+				reusableFooter.css += updatedCss + '\n';
+			}
 		});
 
-		let finalStyles = '';
-		if (Object.keys(allThemeVariables).length > 0) {
-			finalStyles += ':root {\n';
-			Object.entries(allThemeVariables).forEach(([varName, value]) => {
-				finalStyles += `  ${varName}: ${value};\n`;
-			});
-			finalStyles += '}\n\n';
-		}
-		finalStyles += allStyles;
+		tokensInfo.totalPromptTokens += themeTokens.promptTokens;
+		tokensInfo.totalCompletionTokens += themeTokens.completionTokens;
+		tokensInfo.totalTokens += themeTokens.totalTokens;
 
-		const generatedSite = `<!DOCTYPE html>
-<html lang="${language}">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  ${metaTags}
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    ${finalStyles}
-  </style>
-</head>
-<body>
-${allHtml}
-</body>
-</html>`;
+		const finalPages = pagesResult.map((pageResult) => {
+			let pageHtml = '';
+			let pageStyles = '';
+			let pageMetaTags = '';
+			pageResult.forEach((result, resultIdx) => {
+				if (result.status === 'rejected') {
+					console.log(result.reason);
+					return;
+				}
+				const blockResult = result.value;
+				if (!blockResult) return;
+				const { aiContent, tokens, blockData } = blockResult;
+
+				tokensInfo.totalPromptTokens += tokens.promptTokens;
+				tokensInfo.totalCompletionTokens += tokens.completionTokens;
+				tokensInfo.totalTokens += tokens.totalTokens;
+
+				const contentForHtml = { ...aiContent };
+
+				const filledHtml = fillVariables(blockData.html, contentForHtml);
+				if (resultIdx === 0) {
+					pageHtml += reusableHeader.html;
+					pageStyles += reusableHeader.css;
+				}
+				pageHtml += filledHtml + '\n';
+				if (resultIdx === pageResult.length - 1) {
+					pageHtml += reusableFooter.html;
+					pageStyles += reusableFooter.css;
+				}
+
+				const updatedCss = applyThemeToCss(blockData.css, themeVariables.theme);
+				pageStyles += updatedCss + '\n';
+
+				if (aiContent.meta) {
+					pageMetaTags = generateMetaTags(aiContent.meta);
+				}
+			});
+			let finalPageStyles = '';
+			if (Object.keys(themeVariables.theme).length > 0) {
+				finalPageStyles += ':root {\n';
+				Object.entries(themeVariables.theme).forEach(([varName, value]) => {
+					finalPageStyles += `  ${varName}: ${value};\n`;
+				});
+				finalPageStyles += '}\n\n';
+			}
+			finalPageStyles += pageStyles;
+			const generatedSite = `<!DOCTYPE html>
+				<html lang="${language}">
+				<head>
+				<meta charset="UTF-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				${pageMetaTags}
+				<style>
+					* {
+					margin: 0;
+					padding: 0;
+					box-sizing: border-box;
+					}
+					body {
+					font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+					}
+					${finalPageStyles}
+				</style>
+				</head>
+				<body>
+				${pageHtml}
+				</body>
+				</html>`;
+			return generatedSite;
+		});
 
 		const zip = new AdmZip();
-		zip.addFile('index.html', Buffer.from(generatedSite, 'utf8'));
+		finalPages.forEach((finalPage, index) => {
+			const fileName =
+				index === 0 ? 'index.html' : `${toLowerCamelCase(createdPages[index])}.html`;
+			zip.addFile(fileName, Buffer.from(finalPage, 'utf8'));
+		});
 
 		const zipBuffer = zip.toBuffer();
 		const fileName = `site-${name}-${new Date().getTime()}.zip`;
@@ -252,7 +375,7 @@ ${allHtml}
 		return reply.status(201).send({
 			data: {
 				...siteData,
-				preview: generatedSite,
+				preview: finalPages[0],
 			},
 			success: true,
 		});
