@@ -3,65 +3,40 @@ import { blocks, templates, sites, profiles } from '../../db/schema.js';
 import { and, asc, count, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
 import AdmZip from 'adm-zip';
 import { alias } from 'drizzle-orm/pg-core';
-import {
-	generateAIContent,
-	generateReusableBlocks,
-	generateStyles,
-} from '../../utils/aiContentGenerator.js';
+import { generateAIContent } from '../../utils/aiContentGenerator.js';
 import { downloadAndUnzipBlock } from '../../utils/zipHandler.js';
 import JSZip from 'jszip';
 import { PRICE_FOR_PROMPTS } from '../../config/constants.js';
 import slugify from "slugify";
+import {
+	buildSitePages,
+	fillBlock,
+	fillGlobalBlocks,
+	generatePageSeo,
+	getBlockByType,
+	getBlocks
+} from "../../utils/blocks.js";
 
 function cutNumber(number, amountAfterDot) {
 	const factor = 10 ** amountAfterDot;
 	return Math.floor(number * factor) / factor;
 }
 
-function fillVariables(blockResult, theme) {
-	const { aiContent, blockData } = blockResult;
-	let filledHtml = blockData.html;
+function fillVariables(html, aiContent) {
+	let filledHtml = html;
 
-	let childHtml = '';
-	let childStyles = '';
+	Object.keys(aiContent).forEach((varName) => {
+		const varData = aiContent[varName];
 
-	if (aiContent.childBlock) {
-		const childRender = fillVariables(aiContent.childBlock, theme);
-		childHtml = childRender.html;
-		childStyles = childRender.css;
-	}
-
-	function processObject(obj, path) {
-		Object.keys(obj).forEach((key) => {
-			if (key === 'childBlock') return;
-
-			const currentPath = `${path}.${key}`;
-			const val = obj[key];
-
-			if (val !== null && typeof val === 'object') {
-				processObject(val, currentPath);
-			} else if (val !== null) {
-				const placeholder = `\${${currentPath}}`;
-				filledHtml = filledHtml.replaceAll(placeholder, val);
+		Object.keys(varData).forEach((prop) => {
+			if (varData[prop] !== null) {
+				const placeholder = `\${variables.${varName}.${prop}}`;
+				filledHtml = filledHtml.replaceAll(placeholder, varData[prop]);
 			}
 		});
-	}
-	processObject(aiContent, 'variables');
+	});
 
-	if (childHtml) {
-		if (filledHtml.includes('${variables.childContent}')) {
-			filledHtml = filledHtml.replace('${variables.childContent}', childHtml);
-		} else {
-			filledHtml += '\n' + childHtml;
-		}
-	}
-
-	const currentCss = applyThemeToCss(blockData.css, theme);
-
-	return {
-		html: filledHtml,
-		css: currentCss + '\n' + childStyles,
-	};
+	return filledHtml;
 }
 
 function applyThemeToCss(originalCss, themeVariables) {
@@ -117,261 +92,92 @@ function generateMetaTags(metaObject) {
 		.join('\n  ');
 }
 
-const toLowerCamelCase = (str) => {
-	return str
-		.toLowerCase()
-		.split(' ')
-		.map((word, index) => (index === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1)))
-		.join('');
-};
 
 export const createSite = async (request, reply) => {
 	try {
-		const { prompt, templatesIds, isActive, name, trafficSource, country, language } =
+		const { prompt, templateId, isActive, name, trafficSource, country, language } =
 			request.body;
 
 		const template = await db.query.templates.findFirst({
-			where: eq(templates.id, templatesIds[0]),
+			where: eq(templates.id, templateId),
 		});
 
-		const pageNames = [
-			'About Us',
-			'Services',
-			'Portfolio',
-			'Pricing',
-			'Testimonials',
-			'Contact Us',
-			'FAQ',
-		];
-
-		if (!template || !template.definition?.pages) {
+		if (!template) {
 			return reply.status(404).send({ error: 'Template not found' });
 		}
 
-		let tokensInfo = {
+		const tokensInfo = {
 			totalPromptTokens: 0,
 			totalCompletionTokens: 0,
-			totalTokens: 0,
+			totalTokens: 0
 		};
-		const createdPages = [];
 
-		async function generateBlock(blockDef, currentPage, blockIndex, prompt, country, language) {
-			let randomBlockId = null;
-			try {
-				const blocksOfType = await db
-					.select()
-					.from(blocks)
-					.where(eq(blocks.category, blockDef.type));
+		const globalCss = template?.definition?.globals?.css;
 
-				if (blocksOfType.length === 0) return null;
+		const globalBlocks = await getBlocks(template?.definition?.globals?.blocks);
+		const filledGlobalBlocks = await fillGlobalBlocks(
+			globalBlocks,
+			template?.definition?.pages,
+			prompt,
+			country,
+			language
+		);
 
-				const randomBlock = blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
-				randomBlockId = randomBlock.id;
-				const blockData = await downloadAndUnzipBlock(randomBlock.archiveUrl);
+		filledGlobalBlocks.forEach(b => {
+			tokensInfo.totalPromptTokens += b.tokens.promptTokens;
+			tokensInfo.totalCompletionTokens += b.tokens.completionTokens;
+			tokensInfo.totalTokens += b.tokens.totalTokens;
+		});
 
-				const [aiContent, tokens] = await generateAIContent(
-					prompt,
-					blockData.definition.variables,
-					blockDef.type,
-					country,
-					language,
-					currentPage,
-					blockIndex === 0,
-				);
+		const globalBlocksMap = new Map(
+			filledGlobalBlocks.map(b => [b.category, b])
+		);
 
-				if (blockDef.childrenBlock) {
-					const childResult = await generateBlock(
-						blockDef.childrenBlock,
-						currentPage,
-						-1,
-						prompt,
-						country,
-						language,
-					);
-					aiContent.childBlock = childResult;
+		const pages = await Promise.all(
+			template.definition.pages.map(async (pageConfig) => {
+				const blocks = [];
+
+				for (const blockDef of pageConfig.layout) {
+					if (globalBlocksMap.has(blockDef.type)) {
+						blocks.push(globalBlocksMap.get(blockDef.type));
+					} else {
+						const block = await getBlockByType(blockDef.type);
+						const filledBlock = await fillBlock(block, prompt, country, language);
+
+						tokensInfo.totalPromptTokens += filledBlock.tokens.promptTokens;
+						tokensInfo.totalCompletionTokens += filledBlock.tokens.completionTokens;
+						tokensInfo.totalTokens += filledBlock.tokens.totalTokens;
+
+						blocks.push(filledBlock);
+					}
 				}
+
+				const [seo, seoTokens] = await generatePageSeo(pageConfig.title, prompt, language, country);
+
+				tokensInfo.totalPromptTokens += seoTokens.promptTokens;
+				tokensInfo.totalCompletionTokens += seoTokens.completionTokens;
+				tokensInfo.totalTokens += seoTokens.totalTokens;
 
 				return {
-					aiContent,
-					tokens,
-					blockData,
+					title: seo.title,
+					description: seo.description,
+					keywords: seo.keywords,
+					path: pageConfig.path,
+					blocks
 				};
-			} catch (err) {
-				throw new Error(
-					`Block generation with id - ${randomBlockId} failed: ${err.message}`,
-				);
-			}
-		}
-
-		const pagesPromises = template.definition.pages.map((page, pageIndex) => {
-			const currentPage =
-				pageIndex === 0
-					? 'Main Page'
-					: pageNames.splice(Math.floor(Math.random() * pageNames.length), 1)[0];
-			createdPages.push(currentPage);
-			const pagePromises = page.map(async (blockDef, blockIndex) => {
-				return generateBlock(blockDef, currentPage, blockIndex, prompt, country, language);
-			});
-			return Promise.allSettled(pagePromises);
-		});
-		const pagesResult = await Promise.all(pagesPromises);
-		const reusableBlocksPromises = template.definition.reusableBlocks.map(
-			async (reusableBlock) => {
-				try {
-					let selectedBlock;
-					if (reusableBlock.type == 'header') {
-						selectedBlock = await db.query.blocks.findFirst({
-							where: eq(blocks.id, 77),
-						});
-					} else {
-						const blocksOfType = await db
-							.select()
-							.from(blocks)
-							.where(eq(blocks.category, reusableBlock.type));
-
-						if (blocksOfType.length > 0) {
-							selectedBlock =
-								blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
-						}
-					}
-					if (selectedBlock && selectedBlock.archiveUrl) {
-						const blockData = await downloadAndUnzipBlock(selectedBlock.archiveUrl);
-						const [aiContent, tokens] = await generateReusableBlocks(
-							prompt,
-							blockData.definition.variables,
-							reusableBlock.type,
-							country,
-							language,
-							createdPages,
-						);
-						return {
-							aiContent,
-							tokens,
-							blockData,
-							category: selectedBlock.category,
-						};
-					}
-				} catch (err) {
-					console.log(err);
-				}
-			},
+			})
 		);
-		const reusableBlocksPromise = await Promise.allSettled(reusableBlocksPromises);
-		let reusableHeader = {
-			html: '',
-			css: '',
-		};
-		let reusableFooter = {
-			html: '',
-			css: '',
-		};
 
-		const [themeVariables, themeTokens] = await generateStyles(prompt);
+		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
+		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+		const totalPrice = inputPrice + outputPrice;
 
-		reusableBlocksPromise.forEach((result) => {
-			if (result.status === 'rejected') {
-				console.log(result.reason);
-				return;
-			}
-			const reBlock = result.value;
-			if (!reBlock) return;
-			const { tokens, category } = reBlock;
-
-			tokensInfo.totalPromptTokens += tokens.promptTokens;
-			tokensInfo.totalCompletionTokens += tokens.completionTokens;
-			tokensInfo.totalTokens += tokens.totalTokens;
-
-			const rendered = fillVariables(reBlock, themeVariables.theme);
-			if (category == 'header') {
-				reusableHeader.html += rendered.html + '\n';
-				reusableHeader.css += rendered.css + '\n';
-			} else {
-				reusableFooter.html += rendered.html + '\n';
-				reusableFooter.css += rendered.css + '\n';
-			}
-		});
-
-		tokensInfo.totalPromptTokens += themeTokens.promptTokens;
-		tokensInfo.totalCompletionTokens += themeTokens.completionTokens;
-		tokensInfo.totalTokens += themeTokens.totalTokens;
-
-		const finalPages = pagesResult.map((pageResult) => {
-			let pageHtml = '';
-			let pageStyles = '';
-			let pageMetaTags = '';
-			pageResult.forEach((result, resultIdx) => {
-				if (result.status === 'rejected') {
-					console.log(result.reason);
-					return;
-				}
-				const blockResult = result.value;
-				if (!blockResult) return;
-				const { aiContent } = blockResult;
-				const collectTokens = (res) => {
-					tokensInfo.totalPromptTokens += res.tokens.promptTokens;
-					tokensInfo.totalCompletionTokens += res.tokens.completionTokens;
-					tokensInfo.totalTokens += res.tokens.totalTokens;
-					if (res.aiContent.childBlock) collectTokens(res.aiContent.childBlock);
-				};
-				collectTokens(blockResult);
-
-				const renderedBlock = fillVariables(blockResult, themeVariables.theme);
-				if (resultIdx === 0) {
-					pageHtml += reusableHeader.html;
-					pageStyles += reusableHeader.css;
-				}
-				pageHtml += renderedBlock.html + '\n';
-				pageStyles += renderedBlock.css + '\n';
-				if (resultIdx === pageResult.length - 1) {
-					pageHtml += reusableFooter.html;
-					pageStyles += reusableFooter.css;
-				}
-
-				if (aiContent.meta) {
-					pageMetaTags = generateMetaTags(aiContent.meta);
-				}
-			});
-			let finalPageStyles = '';
-			if (Object.keys(themeVariables.theme).length > 0) {
-				finalPageStyles += ':root {\n';
-				Object.entries(themeVariables.theme).forEach(([varName, value]) => {
-					finalPageStyles += `  ${varName}: ${value};\n`;
-				});
-				finalPageStyles += '}\n\n';
-			}
-			finalPageStyles += pageStyles;
-			const generatedSite = `<!DOCTYPE html>
-				<html lang="${language}">
-				<head>
-				<meta charset="UTF-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-				${pageMetaTags}
-				<style>
-					* {
-					margin: 0;
-					padding: 0;
-					box-sizing: border-box;
-					}
-					body {
-					font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-					}
-					${finalPageStyles}
-				</style>
-				</head>
-				<body>
-				${pageHtml}
-				</body>
-				</html>`;
-			return generatedSite;
-		});
+		const sitePages = buildSitePages(pages, globalCss, language, country);
 
 		const zip = new AdmZip();
-		finalPages.forEach((finalPage, index) => {
-			const fileName =
-				index === 0 ? 'index.html' : `${toLowerCamelCase(createdPages[index])}.html`;
-			zip.addFile(fileName, Buffer.from(finalPage, 'utf8'));
+		sitePages.forEach(page => {
+			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
 		});
-
 		const zipBuffer = zip.toBuffer();
 
 		const safeName = slugify(`site-${name}-${new Date().getTime()}.zip`, {
@@ -379,24 +185,160 @@ export const createSite = async (request, reply) => {
 			strict: true,
 		});
 
-		const { error } = await supabase.storage.from('sites').upload(safeName, zipBuffer, {
-			contentType: 'application/zip',
-			upsert: false,
-		});
+		const { error: uploadError } = await supabase.storage
+			.from('sites')
+			.upload(safeName, zipBuffer, {
+				contentType: 'application/zip',
+				upsert: false,
+			});
 
-		if (error) {
-			throw error;
+		if (uploadError) {
+			throw uploadError;
 		}
-
-		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
-		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
-
-		const totalPrice = inputPrice + outputPrice;
 
 		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(safeName);
 
-		console.log('urlData.publicUrl', urlData.publicUrl);
-
+		// const archive = await createArchive(sitePages);
+		// const archiveUrl = await uploadArchive(archive, name);
+		// console.log("globalBlocks", globalBlocks);
+		// console.log("globalCss", globalCss);
+		// console.log("filledGlobalBlocks", filledGlobalBlocks);
+//
+// 		let allStyles = '';
+// 		let allHtml = '';
+// 		let tokensInfo = {
+// 			totalPromptTokens: 0,
+// 			totalCompletionTokens: 0,
+// 			totalTokens: 0,
+// 		};
+//
+// 		let allThemeVariables = {};
+// 		let metaTags = '';
+//
+// 		const blockPromises = template.definition.blocks.map(async (blockDef) => {
+// 			let randomBlockId = null;
+// 			try {
+// 				const blocksOfType = await db
+// 					.select()
+// 					.from(blocks)
+// 					.where(eq(blocks.category, blockDef.type));
+//
+// 				if (blocksOfType.length > 0) {
+// 					const randomBlock =
+// 						blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
+// 					randomBlockId = randomBlock.id;
+// 					const blockData = await downloadAndUnzipBlock(randomBlock.archiveUrl);
+//
+// 					const [aiContent, tokens] = await generateAIContent(
+// 						prompt,
+// 						blockData.definition.variables,
+// 						blockDef.type,
+// 						country,
+// 						language,
+// 					);
+// 					return {
+// 						aiContent,
+// 						tokens,
+// 						blockData,
+// 					};
+// 				}
+// 			} catch (err) {
+// 				throw new Error(`Block generation with id - ${randomBlockId} was failed `);
+// 			}
+// 		});
+// 		const blockResults = await Promise.allSettled(blockPromises);
+// 		blockResults.forEach((result) => {
+// 			if (result.status === 'rejected') {
+// 				console.log(result.reason);
+// 				return;
+// 			}
+// 			const blockResult = result.value;
+// 			if (!blockResult) return;
+// 			const { aiContent, tokens, blockData } = blockResult;
+//
+// 			tokensInfo.totalPromptTokens += tokens.promptTokens;
+// 			tokensInfo.totalCompletionTokens += tokens.completionTokens;
+// 			tokensInfo.totalTokens += tokens.totalTokens;
+//
+// 			console.log('AI Content:', JSON.stringify(aiContent, null, 2));
+//
+// 			const themeVariables = aiContent.theme || {};
+// 			allThemeVariables = { ...allThemeVariables, ...themeVariables };
+//
+// 			const contentForHtml = { ...aiContent };
+// 			delete contentForHtml.theme;
+// 			delete contentForHtml.meta;
+//
+// 			const filledHtml = fillVariables(blockData.html, contentForHtml);
+// 			allHtml += filledHtml + '\n';
+//
+// 			const updatedCss = applyThemeToCss(blockData.css, themeVariables);
+// 			allStyles += updatedCss + '\n';
+//
+// 			metaTags = generateMetaTags(aiContent.meta);
+// 		});
+//
+// 		let finalStyles = '';
+// 		if (Object.keys(allThemeVariables).length > 0) {
+// 			finalStyles += ':root {\n';
+// 			Object.entries(allThemeVariables).forEach(([varName, value]) => {
+// 				finalStyles += `  ${varName}: ${value};\n`;
+// 			});
+// 			finalStyles += '}\n\n';
+// 		}
+// 		finalStyles += allStyles;
+//
+// 		const generatedSite = `<!DOCTYPE html>
+// <html lang="${language}">
+// <head>
+//   <meta charset="UTF-8">
+//   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+//   ${metaTags}
+//   <style>
+//     * {
+//       margin: 0;
+//       padding: 0;
+//       box-sizing: border-box;
+//     }
+//     body {
+//       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+//     }
+//     ${finalStyles}
+//   </style>
+// </head>
+// <body>
+// ${allHtml}
+// </body>
+// </html>`;
+//
+// 		const zip = new AdmZip();
+// 		zip.addFile('index.html', Buffer.from(generatedSite, 'utf8'));
+//
+// 		const zipBuffer = zip.toBuffer();
+//
+// 		const safeName = slugify(`site-${name}-${new Date().getTime()}.zip`, {
+// 			lower: true,
+// 			strict: true,
+// 		});
+//
+// 		const { error } = await supabase.storage.from('sites').upload(safeName, zipBuffer, {
+// 			contentType: 'application/zip',
+// 			upsert: false,
+// 		});
+//
+// 		if (error) {
+// 			throw error;
+// 		}
+//
+// 		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
+// 		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+//
+// 		const totalPrice = inputPrice + outputPrice;
+//
+// 		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(safeName);
+//
+// 		console.log('urlData.publicUrl', urlData.publicUrl);
+//
 		const [siteData] = await db
 			.insert(sites)
 			.values({
@@ -422,8 +364,10 @@ export const createSite = async (request, reply) => {
 
 		return reply.status(201).send({
 			data: {
+				// pages,
+				// sitePages,
 				...siteData,
-				preview: finalPages[0],
+				// preview: generatedSite,
 			},
 			success: true,
 		});

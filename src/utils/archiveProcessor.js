@@ -5,11 +5,8 @@ import path from 'path';
 
 // Required files for web template
 const REQUIRED_FILES = [
-	'template.html',
+	'index.njk',
 	'styles.css',
-	// "main.js",
-	'build-preview.js',
-	'preview.html',
 	'definition.json',
 ];
 
@@ -48,12 +45,7 @@ async function validateFileContent(filename, buffer) {
 	switch (filename) {
 		case 'definition.json':
 			try {
-				const parsed = JSON.parse(content);
-
-				// Validate required fields in definition.json
-				if (!parsed.name || typeof parsed.name !== 'string') {
-					throw new Error('definition.json must contain a "name" field');
-				}
+				JSON.parse(content);
 			} catch (error) {
 				if (error.name === 'SyntaxError') {
 					throw new Error(`File ${filename} contains invalid JSON: ${error.message}`);
@@ -62,7 +54,7 @@ async function validateFileContent(filename, buffer) {
 			}
 			break;
 
-		case 'template.html':
+		case 'index.njk':
 			if (content.trim().length === 0) {
 				throw new Error(`File ${filename} cannot be empty`);
 			}
@@ -76,18 +68,6 @@ async function validateFileContent(filename, buffer) {
 		case 'styles.css':
 			if (content.trim().length === 0) {
 				throw new Error(`File ${filename} cannot be empty`);
-			}
-			break;
-
-		case 'preview.html':
-			if (content.trim().length === 0) {
-				// Optional: can be empty
-			}
-			break;
-
-		case 'build-preview.js':
-			if (content.trim().length === 0) {
-				// Optional: can be empty
 			}
 			break;
 
@@ -114,9 +94,6 @@ export async function extractAndValidate(buffer) {
 			(requiredFile) => !fileList.includes(requiredFile),
 		);
 
-		console.log('fileList', fileList);
-		console.log('missingFiles', missingFiles);
-
 		if (missingFiles.length > 0) {
 			throw new Error(`Missing required files: ${missingFiles.join(', ')}`);
 		}
@@ -126,7 +103,6 @@ export async function extractAndValidate(buffer) {
 
 		for (const requiredFile of REQUIRED_FILES) {
 			const entry = zipEntries.find((e) => e.entryName === requiredFile);
-			console.log('entry =>', entry);
 			if (entry) {
 				const fileBuffer = entry.getData();
 
@@ -201,32 +177,11 @@ export function parseTemplateDefinition(definitionContent, fallbackName) {
  * Create complete block definition for database
  */
 export async function createBlockDefinition(archiveBuffer, fileData, extractedFiles, name) {
-	const definitionContent = extractedFiles['definition.json'].content;
-	const templateDefinition = parseTemplateDefinition(definitionContent, name);
-
-	const fileStats = getFileStats(extractedFiles);
-
 	return {
 		originalArchive: {
 			filename: fileData.filename,
 			mimeType: fileData.mimetype,
 			size: archiveBuffer.length,
-		},
-		template: templateDefinition,
-		files: {
-			template: fileStats['template.html'],
-			styles: fileStats['styles.css'],
-			// script: fileStats["main.js"],
-			definition: fileStats['definition.json'],
-		},
-		validation: {
-			isValid: true,
-			requiredFiles: REQUIRED_FILES,
-			validatedAt: new Date().toISOString(),
-		},
-		structure: {
-			totalFiles: Object.keys(extractedFiles).length,
-			totalSize: archiveBuffer.length,
 		},
 	};
 }
@@ -276,9 +231,5 @@ export default {
 	validateArchive,
 	extractAndValidate,
 	generateArchiveName,
-	getFileStats,
-	parseTemplateDefinition,
-	createBlockDefinition,
-	quickValidate,
 	constants: archiveConstants,
 };

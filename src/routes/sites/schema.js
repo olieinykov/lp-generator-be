@@ -4,15 +4,10 @@ export const createSiteSchema = {
 	description: 'Create new site',
 	body: {
 		type: 'object',
-		required: ['templatesIds'],
+		required: ['templateId'],
 		properties: {
-			templatesIds: {
-				type: 'array',
-				items: {
-					type: 'number',
-				},
-				minItems: 1,
-				uniqueItems: true,
+			templateId: {
+				type: 'number',
 			},
 			prompt: {
 				type: 'string',

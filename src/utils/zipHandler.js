@@ -15,7 +15,7 @@ export async function downloadAndUnzipBlock(archiveUrl) {
 
 		if (entry.entryName === 'definition.json') {
 			blockData.definition = JSON.parse(content);
-		} else if (entry.entryName === 'template.html') {
+		} else if (entry.entryName === 'index.njk') {
 			blockData.html = content;
 		} else if (entry.entryName === 'styles.css') {
 			blockData.css = content;
