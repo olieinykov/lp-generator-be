@@ -10,12 +10,13 @@ import { PRICE_FOR_PROMPTS } from '../../config/constants.js';
 import slugify from "slugify";
 import {
 	buildSitePages,
-	fillBlock,
-	fillGlobalBlocks, flatPageBlocks,
+	// fillBlock,
+	// fillGlobalBlocks,
+	flatPageBlocks,
 	generatePageSeo,
 	generateTheme,
 	getBlockByType,
-	getBlocks
+	getBlocks, prepareBlock, prepareGlobalBlocks
 } from "../../utils/blocks.js";
 
 function cutNumber(number, amountAfterDot) {
@@ -126,20 +127,20 @@ export const createSite = async (request, reply) => {
 		};
 
 		const globalBlocks = await getBlocks(template?.definition?.globals?.blocks);
-		const filledGlobalBlocks = await fillGlobalBlocks(
+		const preparedGlobalBlocks = await prepareGlobalBlocks(
 			globalBlocks,
 			template?.definition?.pages,
 			prompt,
 			country,
 			language
 		);
-		filledGlobalBlocks.forEach(b => {
+		preparedGlobalBlocks.forEach(b => {
 			tokensInfo.totalPromptTokens += b.tokens.promptTokens;
 			tokensInfo.totalCompletionTokens += b.tokens.completionTokens;
 			tokensInfo.totalTokens += b.tokens.totalTokens;
 		});
 
-		const globalBlocksMap = new Map(filledGlobalBlocks.map(b => [b.category, b]));
+		const globalBlocksMap = new Map(preparedGlobalBlocks.map(b => [b.category, b]));
 		const pagesBlocks = flatPageBlocks(template.definition.pages);
 
 		const generatedBlocks = await Promise.allSettled(pagesBlocks.map(async (blockDef) => {
@@ -163,16 +164,16 @@ export const createSite = async (request, reply) => {
 					};
 				} else {
 					const block = await getBlockByType(blockDef.type);
-					const filledBlock = await fillBlock(block, prompt, country, language);
+					const preparedBlock = await prepareBlock(block, prompt, country, language);
 
-					tokensInfo.totalPromptTokens += filledBlock.tokens.promptTokens;
-					tokensInfo.totalCompletionTokens += filledBlock.tokens.completionTokens;
-					tokensInfo.totalTokens += filledBlock.tokens.totalTokens;
+					tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
+					tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
+					tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
 
 					return {
 						hasError: false,
 						...baseInfo,
-						...filledBlock,
+						...preparedBlock,
 					};
 				}
 			} catch (error) {
@@ -194,7 +195,7 @@ export const createSite = async (request, reply) => {
 			}];
 		}, [])
 
-		console.log("finalPages", pages);
+		console.log("finalPages ====>", pages);
 		// return console.log("generatedBlocks", generatedBlocks.map(blockResult => blockResult.value));
 
 		// const pages = await Promise.all(
@@ -236,8 +237,9 @@ export const createSite = async (request, reply) => {
 		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
 		const totalPrice = inputPrice + outputPrice;
 
-		const sitePages = buildSitePages(pages, globalCss, language, country);
 
+		const sitePages = buildSitePages(pages, globalCss, language, country);
+		console.log("sitePages =>", sitePages);
 		const zip = new AdmZip();
 		sitePages.forEach(page => {
 			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));

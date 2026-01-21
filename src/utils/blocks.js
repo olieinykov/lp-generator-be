@@ -192,7 +192,7 @@ Return ONLY valid JSON. All text in ${language}.
     ];
 };
 
-export const fillBlock = async (block, prompt, country, language, navigation = null) => {
+export const prepareBlock = async (block, prompt, country, language, navigation = null) => {
     const [aiContent, tokens] = await generateBlockContent(
         block.definition.variables,
         block.category,
@@ -205,9 +205,15 @@ export const fillBlock = async (block, prompt, country, language, navigation = n
         ? { ...aiContent, navigation }
         : aiContent;
 
-    const html = nunjucks.renderString(block.html, variables);
+    console.log("variables", variables);
+    console.log("block", block);
 
-    return { ...block, variables, html, tokens };
+    // const html = nunjucks.renderString(block.html, {
+    //     ...variables,
+    //     _blockId: `${block.id}:${block.category}`
+    // });
+
+    return { ...block, variables, tokens };
 };
 
 // ==================== СОСТАВНЫЕ ОПЕРАЦИИ ====================
@@ -222,7 +228,7 @@ export const getBlocks = async (blocksList = []) => {
         .map(r => r.value);
 };
 
-export const fillGlobalBlocks = async (globalBlocks, templatePages, prompt, country, language) => {
+export const prepareGlobalBlocks = async (globalBlocks, templatePages, prompt, country, language) => {
     let navigationLabels = null;
 
     const results = await Promise.allSettled(
@@ -253,9 +259,9 @@ export const fillGlobalBlocks = async (globalBlocks, templatePages, prompt, coun
             };
 
             const variables = { ...aiContent, navigation };
-            const html = nunjucks.renderString(block.html, variables);
+            // const html = nunjucks.renderString(block.html, variables);
 
-            return { ...block, variables, html, tokens };
+            return { ...block, variables , tokens };
         })
     );
 
@@ -314,8 +320,17 @@ All text in ${language}. Return ONLY valid JSON.
 // ==================== HTML BUILDER ====================
 
 export const buildPageHtml = (page, globalCss, language, country) => {
-    const blocksHtml = page.blocks.map(b => b.html).join('\n');
-    const blocksCss = page.blocks.map(b => b.css).join('\n');
+    const filledBlocks = page.blocks.map((block, blockIndex) => {
+        return {
+            ...block,
+            html: nunjucks.renderString(block.html, {
+                ...block.variables,
+                _blockId: `${block.category}:${block.id}:${block.pageIndex}:${blockIndex}`
+            }),
+        };
+    })
+    const blocksHtml = filledBlocks.map(b => b.html).join('\n');
+    const blocksCss = filledBlocks.map(b => b.css).join('\n');
 
     const cssVariables = Object.entries(globalCss || {})
         .map(([key, value]) => `${key}: ${value};`)
