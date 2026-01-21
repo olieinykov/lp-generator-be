@@ -11,8 +11,9 @@ import slugify from "slugify";
 import {
 	buildSitePages,
 	fillBlock,
-	fillGlobalBlocks,
+	fillGlobalBlocks, flatPageBlocks,
 	generatePageSeo,
+	generateTheme,
 	getBlockByType,
 	getBlocks
 } from "../../utils/blocks.js";
@@ -112,7 +113,17 @@ export const createSite = async (request, reply) => {
 			totalTokens: 0
 		};
 
-		const globalCss = template?.definition?.globals?.css;
+
+
+		const { theme: generatedTheme, tokens: themeTokens } = await generateTheme(prompt);
+		tokensInfo.totalPromptTokens += themeTokens.promptTokens;
+		tokensInfo.totalCompletionTokens += themeTokens.completionTokens;
+		tokensInfo.totalTokens += themeTokens.totalTokens;
+
+		const globalCss = {
+			...generatedTheme,
+			// ...(template?.definition?.globals?.css || {})
+		};
 
 		const globalBlocks = await getBlocks(template?.definition?.globals?.blocks);
 		const filledGlobalBlocks = await fillGlobalBlocks(
@@ -122,51 +133,104 @@ export const createSite = async (request, reply) => {
 			country,
 			language
 		);
-
 		filledGlobalBlocks.forEach(b => {
 			tokensInfo.totalPromptTokens += b.tokens.promptTokens;
 			tokensInfo.totalCompletionTokens += b.tokens.completionTokens;
 			tokensInfo.totalTokens += b.tokens.totalTokens;
 		});
 
-		const globalBlocksMap = new Map(
-			filledGlobalBlocks.map(b => [b.category, b])
-		);
+		const globalBlocksMap = new Map(filledGlobalBlocks.map(b => [b.category, b]));
+		const pagesBlocks = flatPageBlocks(template.definition.pages);
 
-		const pages = await Promise.all(
-			template.definition.pages.map(async (pageConfig) => {
-				const blocks = [];
+		const generatedBlocks = await Promise.allSettled(pagesBlocks.map(async (blockDef) => {
+			const isGlobal = globalBlocksMap.has(blockDef.type);
+			const baseInfo = {
+				pageIndex: blockDef.pageIndex,
+				blockType: blockDef.type,
+				isGlobal,
+			}
 
-				for (const blockDef of pageConfig.layout) {
-					if (globalBlocksMap.has(blockDef.type)) {
-						blocks.push(globalBlocksMap.get(blockDef.type));
-					} else {
-						const block = await getBlockByType(blockDef.type);
-						const filledBlock = await fillBlock(block, prompt, country, language);
+			try {
 
-						tokensInfo.totalPromptTokens += filledBlock.tokens.promptTokens;
-						tokensInfo.totalCompletionTokens += filledBlock.tokens.completionTokens;
-						tokensInfo.totalTokens += filledBlock.tokens.totalTokens;
+				// if (blockDef.type === "info") {
+				// 	throw new Error("My custom error")
+				// }
+				if (isGlobal) {
+					const block = globalBlocksMap.get(blockDef.type);
+					return {
+						...baseInfo,
+						...block,
+					};
+				} else {
+					const block = await getBlockByType(blockDef.type);
+					const filledBlock = await fillBlock(block, prompt, country, language);
 
-						blocks.push(filledBlock);
-					}
+					tokensInfo.totalPromptTokens += filledBlock.tokens.promptTokens;
+					tokensInfo.totalCompletionTokens += filledBlock.tokens.completionTokens;
+					tokensInfo.totalTokens += filledBlock.tokens.totalTokens;
+
+					return {
+						hasError: false,
+						...baseInfo,
+						...filledBlock,
+					};
 				}
-
-				const [seo, seoTokens] = await generatePageSeo(pageConfig.title, prompt, language, country);
-
-				tokensInfo.totalPromptTokens += seoTokens.promptTokens;
-				tokensInfo.totalCompletionTokens += seoTokens.completionTokens;
-				tokensInfo.totalTokens += seoTokens.totalTokens;
-
+			} catch (error) {
 				return {
-					title: seo.title,
-					description: seo.description,
-					keywords: seo.keywords,
-					path: pageConfig.path,
-					blocks
+					...baseInfo,
+					error: error.message,
+					hasError: true,
 				};
-			})
-		);
+			}
+		}));
+		const pagesWithBlocks = generatedBlocks.map(blockResult => blockResult.value);
+
+		console.log("pages ===>", pagesWithBlocks);
+		const pages = template.definition.pages.reduce((acc, page, pageIndex) => {
+			const blocks = pagesWithBlocks.filter(block => block.pageIndex === pageIndex);
+			return [...acc, {
+				...page,
+				blocks
+			}];
+		}, [])
+
+		console.log("finalPages", pages);
+		// return console.log("generatedBlocks", generatedBlocks.map(blockResult => blockResult.value));
+
+		// const pages = await Promise.all(
+		// 	template.definition.pages.map(async (pageConfig) => {
+		// 		const blocks = [];
+		//
+		// 		for (const blockDef of pageConfig.layout) {
+		// 			if (globalBlocksMap.has(blockDef.type)) {
+		// 				blocks.push(globalBlocksMap.get(blockDef.type));
+		// 			} else {
+		// 				const block = await getBlockByType(blockDef.type);
+		// 				const filledBlock = await fillBlock(block, prompt, country, language);
+		//
+		// 				tokensInfo.totalPromptTokens += filledBlock.tokens.promptTokens;
+		// 				tokensInfo.totalCompletionTokens += filledBlock.tokens.completionTokens;
+		// 				tokensInfo.totalTokens += filledBlock.tokens.totalTokens;
+		//
+		// 				blocks.push(filledBlock);
+		// 			}
+		// 		}
+		//
+		// 		const [seo, seoTokens] = await generatePageSeo(pageConfig.title, prompt, language, country);
+		//
+		// 		tokensInfo.totalPromptTokens += seoTokens.promptTokens;
+		// 		tokensInfo.totalCompletionTokens += seoTokens.completionTokens;
+		// 		tokensInfo.totalTokens += seoTokens.totalTokens;
+		//
+		// 		return {
+		// 			title: seo.title,
+		// 			description: seo.description,
+		// 			keywords: seo.keywords,
+		// 			path: pageConfig.path,
+		// 			blocks
+		// 		};
+		// 	})
+		// );
 
 		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
 		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
@@ -198,147 +262,6 @@ export const createSite = async (request, reply) => {
 
 		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(safeName);
 
-		// const archive = await createArchive(sitePages);
-		// const archiveUrl = await uploadArchive(archive, name);
-		// console.log("globalBlocks", globalBlocks);
-		// console.log("globalCss", globalCss);
-		// console.log("filledGlobalBlocks", filledGlobalBlocks);
-//
-// 		let allStyles = '';
-// 		let allHtml = '';
-// 		let tokensInfo = {
-// 			totalPromptTokens: 0,
-// 			totalCompletionTokens: 0,
-// 			totalTokens: 0,
-// 		};
-//
-// 		let allThemeVariables = {};
-// 		let metaTags = '';
-//
-// 		const blockPromises = template.definition.blocks.map(async (blockDef) => {
-// 			let randomBlockId = null;
-// 			try {
-// 				const blocksOfType = await db
-// 					.select()
-// 					.from(blocks)
-// 					.where(eq(blocks.category, blockDef.type));
-//
-// 				if (blocksOfType.length > 0) {
-// 					const randomBlock =
-// 						blocksOfType[Math.floor(Math.random() * blocksOfType.length)];
-// 					randomBlockId = randomBlock.id;
-// 					const blockData = await downloadAndUnzipBlock(randomBlock.archiveUrl);
-//
-// 					const [aiContent, tokens] = await generateAIContent(
-// 						prompt,
-// 						blockData.definition.variables,
-// 						blockDef.type,
-// 						country,
-// 						language,
-// 					);
-// 					return {
-// 						aiContent,
-// 						tokens,
-// 						blockData,
-// 					};
-// 				}
-// 			} catch (err) {
-// 				throw new Error(`Block generation with id - ${randomBlockId} was failed `);
-// 			}
-// 		});
-// 		const blockResults = await Promise.allSettled(blockPromises);
-// 		blockResults.forEach((result) => {
-// 			if (result.status === 'rejected') {
-// 				console.log(result.reason);
-// 				return;
-// 			}
-// 			const blockResult = result.value;
-// 			if (!blockResult) return;
-// 			const { aiContent, tokens, blockData } = blockResult;
-//
-// 			tokensInfo.totalPromptTokens += tokens.promptTokens;
-// 			tokensInfo.totalCompletionTokens += tokens.completionTokens;
-// 			tokensInfo.totalTokens += tokens.totalTokens;
-//
-// 			console.log('AI Content:', JSON.stringify(aiContent, null, 2));
-//
-// 			const themeVariables = aiContent.theme || {};
-// 			allThemeVariables = { ...allThemeVariables, ...themeVariables };
-//
-// 			const contentForHtml = { ...aiContent };
-// 			delete contentForHtml.theme;
-// 			delete contentForHtml.meta;
-//
-// 			const filledHtml = fillVariables(blockData.html, contentForHtml);
-// 			allHtml += filledHtml + '\n';
-//
-// 			const updatedCss = applyThemeToCss(blockData.css, themeVariables);
-// 			allStyles += updatedCss + '\n';
-//
-// 			metaTags = generateMetaTags(aiContent.meta);
-// 		});
-//
-// 		let finalStyles = '';
-// 		if (Object.keys(allThemeVariables).length > 0) {
-// 			finalStyles += ':root {\n';
-// 			Object.entries(allThemeVariables).forEach(([varName, value]) => {
-// 				finalStyles += `  ${varName}: ${value};\n`;
-// 			});
-// 			finalStyles += '}\n\n';
-// 		}
-// 		finalStyles += allStyles;
-//
-// 		const generatedSite = `<!DOCTYPE html>
-// <html lang="${language}">
-// <head>
-//   <meta charset="UTF-8">
-//   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-//   ${metaTags}
-//   <style>
-//     * {
-//       margin: 0;
-//       padding: 0;
-//       box-sizing: border-box;
-//     }
-//     body {
-//       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-//     }
-//     ${finalStyles}
-//   </style>
-// </head>
-// <body>
-// ${allHtml}
-// </body>
-// </html>`;
-//
-// 		const zip = new AdmZip();
-// 		zip.addFile('index.html', Buffer.from(generatedSite, 'utf8'));
-//
-// 		const zipBuffer = zip.toBuffer();
-//
-// 		const safeName = slugify(`site-${name}-${new Date().getTime()}.zip`, {
-// 			lower: true,
-// 			strict: true,
-// 		});
-//
-// 		const { error } = await supabase.storage.from('sites').upload(safeName, zipBuffer, {
-// 			contentType: 'application/zip',
-// 			upsert: false,
-// 		});
-//
-// 		if (error) {
-// 			throw error;
-// 		}
-//
-// 		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
-// 		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
-//
-// 		const totalPrice = inputPrice + outputPrice;
-//
-// 		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(safeName);
-//
-// 		console.log('urlData.publicUrl', urlData.publicUrl);
-//
 		const [siteData] = await db
 			.insert(sites)
 			.values({
@@ -363,12 +286,7 @@ export const createSite = async (request, reply) => {
 			.returning();
 
 		return reply.status(201).send({
-			data: {
-				// pages,
-				// sitePages,
-				...siteData,
-				// preview: generatedSite,
-			},
+			data: siteData,
 			success: true,
 		});
 	} catch (error) {

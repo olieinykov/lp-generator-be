@@ -5,6 +5,8 @@ import { downloadAndUnzipBlock } from "./zipHandler.js";
 import OpenAI from "openai";
 import * as fal from "@fal-ai/serverless-client";
 import nunjucks from "nunjucks";
+import fs from 'fs/promises';
+import path from 'path';
 
 const openai = new OpenAI({
     apiKey: process.env.OPEN_AI_KEY,
@@ -103,8 +105,7 @@ Add to your response:
 Labels must be in ${language}, short (1-3 words), natural for website navigation.
 ` : '';
 
-    const systemPrompt = `
-You are a content AND visual style generator for website blocks.
+    const systemPrompt = `You are a CONTENT generator for website blocks.
 
 STRICT LOCALIZATION & CONTEXT RULES:
 - Language: ${language}
@@ -113,6 +114,9 @@ STRICT LOCALIZATION & CONTEXT RULES:
 Your task:
 - Generate content variables for the block type: ${blockCategory}
 - DO NOT generate navigation structure — it will be provided separately
+- DO NOT generate any CSS, styles, or design tokens
+- Generate NATURAL, human-readable text
+
 ${navInstruction}
 =====================
 CONTENT VARIABLES RULES
@@ -124,6 +128,18 @@ CONTENT VARIABLES RULES
 
 VARIABLES TO FILL:
 ${variablesDescription}
+
+=====================
+OUTPUT FORMAT
+=====================
+Return a FLAT JSON object where each key is the variable name.
+
+Example for Ukrainian header block:
+{
+  "logoText": {"value": "Норвезька Архітектура"},
+  "logoImage": {"href": "minimalist logo with viking symbols and modern typography", "alt": "Логотип норвезької архітектури"},
+  "ctaButton": {"href": "/contact", "label": "Зв'язатися з нами"}
+}
 
 =====================
 OUTPUT FORMAT
@@ -275,7 +291,6 @@ All text in ${language}. Return ONLY valid JSON.
             { role: 'system', content: systemPrompt },
             { role: 'user', content: prompt || 'Create SEO for website' },
         ],
-        // temperature: 0.7,
         temperature: 1,
     });
 
@@ -301,6 +316,10 @@ All text in ${language}. Return ONLY valid JSON.
 export const buildPageHtml = (page, globalCss, language, country) => {
     const blocksHtml = page.blocks.map(b => b.html).join('\n');
     const blocksCss = page.blocks.map(b => b.css).join('\n');
+
+    const cssVariables = Object.entries(globalCss || {})
+        .map(([key, value]) => `${key}: ${value};`)
+        .join('\n    ');
 
     return `<!DOCTYPE html>
 <html lang="${language}">
@@ -328,7 +347,23 @@ export const buildPageHtml = (page, globalCss, language, country) => {
     <meta name="twitter:description" content="${page.description || ''}">
     
     <style>
-        ${globalCss || ''}
+        :root {
+            ${cssVariables}
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+       
+        body {
+            font-family: var(--font-body, sans-serif);
+            color: var(--color-text, #333);
+            background-color: var(--color-background, #fff);
+            line-height: var(--line-height-normal, 1.6);
+        }
+        
         ${blocksCss}
     </style>
 </head>
@@ -343,4 +378,77 @@ export const buildSitePages = (pages, globalCss, language, country) => {
         filename: page.path === "/" ? "index.html" : `${page.path.slice(1)}.html`,
         html: buildPageHtml(page, globalCss, language, country)
     }));
+};
+
+export const generateTheme = async (prompt) => {
+    console.log("process.cwd()", process.cwd())
+    const cssThemePath = path.join(process.cwd(), 'src/const/css-theme.txt');
+    console.log("cssVariablesText", cssThemePath)
+    const cssVariablesText = await fs.readFile(cssThemePath, 'utf-8');
+    console.log("cssVariablesText", cssVariablesText)
+
+    const systemPrompt = `You are a web designer. Create a CSS theme.
+
+Website description: ${prompt}
+
+CSS variables to generate (with descriptions):
+${cssVariablesText}
+
+Return JSON with all variables and their CSS values. Example:
+{
+  "--color-primary": "#3b82f6",
+  "--font-heading": "'Inter', sans-serif"
+}
+
+Return only JSON.`;
+
+    const completion = await openai.chat.completions.create({
+        model: 'gpt-5-mini',
+        messages: [
+            {
+                role: 'system',
+                content: systemPrompt
+            },
+            {
+                role: 'user',
+                content: prompt
+            }
+        ],
+        temperature: 1,
+    });
+
+    const content = completion.choices[0].message.content;
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+
+    if (!jsonMatch) {
+        throw new Error('AI did not return valid JSON for theme');
+    }
+
+    let theme;
+    try {
+        theme = JSON.parse(jsonMatch[0]);
+    } catch (e) {
+        throw new Error('Failed to parse theme JSON from AI response');
+    }
+
+    return {
+        theme,
+        tokens: {
+            promptTokens: completion.usage.prompt_tokens,
+            completionTokens: completion.usage.completion_tokens,
+            totalTokens: completion.usage.total_tokens,
+        }
+    };
+};
+
+export const flatPageBlocks = (pages) => {
+    return pages.reduce((flatBlocks, page, pageIndex) => {
+        const pageBlocks = (page?.layout ?? []).map((blockDef, blockIndex) => ({
+            blockIndex: blockIndex,
+            pageIndex: pageIndex,
+            ...blockDef,
+        }));
+
+        return [...flatBlocks, ...pageBlocks];
+    }, []);
 };
