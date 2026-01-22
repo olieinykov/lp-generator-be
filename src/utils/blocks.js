@@ -1,109 +1,112 @@
-import { db } from "../db/connection.js";
-import { blocks } from "../db/schema.js";
-import { and, eq, sql } from "drizzle-orm";
-import { downloadAndUnzipBlock } from "./zipHandler.js";
-import OpenAI from "openai";
-import * as fal from "@fal-ai/serverless-client";
-import nunjucks from "nunjucks";
+import { db } from '../db/connection.js';
+import { blocks } from '../db/schema.js';
+import { and, eq, sql } from 'drizzle-orm';
+import { downloadAndUnzipBlock } from './zipHandler.js';
+import OpenAI from 'openai';
+import * as fal from '@fal-ai/serverless-client';
+import nunjucks from 'nunjucks';
 import fs from 'fs/promises';
 import path from 'path';
 
 const openai = new OpenAI({
-    apiKey: process.env.OPEN_AI_KEY,
+	apiKey: process.env.OPEN_AI_KEY,
 });
 
 fal.config({
-    credentials: process.env.FAL_KEY,
+	credentials: process.env.FAL_KEY,
 });
 
 const generateImageWithFal = async (prompt) => {
-    try {
-        const result = await fal.subscribe('fal-ai/flux/schnell', {
-            input: {
-                prompt: prompt,
-                image_size: 'landscape_16_9',
-                num_inference_steps: 4,
-                num_images: 1,
-            },
-        });
-        return result.images[0].url;
-    } catch (error) {
-        console.error('Fal.ai error:', error);
-        return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=600`;
-    }
+	try {
+		const result = await fal.subscribe('fal-ai/flux/schnell', {
+			input: {
+				prompt: prompt,
+				image_size: 'landscape_16_9',
+				num_inference_steps: 4,
+				num_images: 1,
+			},
+		});
+		return result.images[0].url;
+	} catch (error) {
+		console.error('Fal.ai error:', error);
+		return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=600`;
+	}
 };
 
 const processImages = async (content, variables) => {
-    for (const [key, value] of Object.entries(content)) {
-        const varDef = variables[key];
+	for (const [key, value] of Object.entries(content)) {
+		const varDef = variables[key];
 
-        if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
-            content[key].href = await generateImageWithFal(value.href);
-        }
+		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
+			content[key].href = await generateImageWithFal(value.href);
+		}
 
-        if (varDef?.type === 'array' && Array.isArray(value?.values)) {
-            for (const item of value.values) {
-                for (const [itemKey, itemValue] of Object.entries(item)) {
-                    if (itemValue?.href && !itemValue.href.startsWith('http')) {
-                        item[itemKey].href = await generateImageWithFal(itemValue.href);
-                    }
-                }
-            }
-        }
-    }
-    return content;
+		if (varDef?.type === 'array' && Array.isArray(value?.values)) {
+			for (const item of value.values) {
+				for (const [itemKey, itemValue] of Object.entries(item)) {
+					if (itemValue?.href && !itemValue.href.startsWith('http')) {
+						item[itemKey].href = await generateImageWithFal(itemValue.href);
+					}
+				}
+			}
+		}
+	}
+	return content;
 };
 
 // ==================== БАЗОВЫЕ ОПЕРАЦИИ ====================
 
 export const getBlockByType = async (type) => {
-    const [block] = await db
-        .select()
-        .from(blocks)
-        .where(
-            and(
-                eq(blocks.category, type),
-                eq(blocks.isActive, true)
-            )
-        )
-        .orderBy(sql`RANDOM()`)
-        .limit(1);
+	const [block] = await db
+		.select()
+		.from(blocks)
+		.where(and(eq(blocks.category, type), eq(blocks.isActive, true)))
+		.orderBy(sql`RANDOM()`)
+		.limit(1);
 
-    if (!block) {
-        throw new Error(`No active block found for type: ${type}`);
-    }
+	if (!block) {
+		throw new Error(`No active block found for type: ${type}`);
+	}
 
-    const unzippedBlock = await downloadAndUnzipBlock(block.archiveUrl);
+	const unzippedBlock = await downloadAndUnzipBlock(block.archiveUrl);
 
-    return {
-        category: block.category,
-        id: block.id,
-        ...unzippedBlock,
-    };
+	return {
+		category: block.category,
+		id: block.id,
+		...unzippedBlock,
+	};
 };
 
-export const generateBlockContent = async (variables, blockCategory, prompt, country, language, templatePages = null) => {
-    const filteredVariables = Object.entries(variables)
-        .filter(([name, v]) => v.type !== 'nav');
+export const generateBlockContent = async (
+	variables,
+	blockCategory,
+	prompt,
+	country,
+	language,
+	templatePages = null,
+) => {
+	const filteredVariables = Object.entries(variables).filter(([name, v]) => v.type !== 'nav');
 
-    const variablesDescription = filteredVariables
-        .map(([name, v]) => `- ${name} (type: ${v.type})`)
-        .join('\n');
+	const variablesDescription = filteredVariables
+		.map(([name, v]) => `- ${name} (type: ${v.type})`)
+		.join('\n');
 
-    const navInstruction = templatePages ? `
+	const navInstruction = templatePages
+		? `
 =====================
 NAVIGATION LABELS
 =====================
 Generate translated navigation labels for these pages:
-${templatePages.map(p => `- "${p.title}" (path: ${p.path})`).join('\n')}
+${templatePages.map((p) => `- "${p.title}" (path: ${p.path})`).join('\n')}
 
 Add to your response:
 "navigationLabels": ["Translated Label 1", "Translated Label 2", ...]
 
 Labels must be in ${language}, short (1-3 words), natural for website navigation.
-` : '';
+`
+		: '';
 
-    const systemPrompt = `You are a CONTENT generator for website blocks.
+	const systemPrompt = `You are a CONTENT generator for website blocks.
 
 STRICT LOCALIZATION & CONTEXT RULES:
 - Language: ${language}
@@ -148,8 +151,12 @@ CORRECT FORMAT:
 {
   "logoText": {"value": "Company Name"},
   "logoImage": {"href": "dark logo with space theme", "alt": "Logo"},
-  "logoLink": {"value": null, "href": "/", "label": "Home"}${templatePages ? `,
-  "navigationLabels": ["Label 1", "Label 2"]` : ''}
+  "logoLink": {"value": null, "href": "/", "label": "Home"}${
+		templatePages
+			? `,
+  "navigationLabels": ["Label 1", "Label 2"]`
+			: ''
+  }
 }
 
 WRONG FORMAT (do NOT group by type):
@@ -162,107 +169,106 @@ WRONG FORMAT (do NOT group by type):
 Return ONLY valid JSON. All text in ${language}.
 `;
 
-    const completion = await openai.chat.completions.create({
-        model: 'gpt-5-mini',
-        messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: prompt || 'Create professional website content' },
-        ],
-        temperature: 1,
-    });
+	const completion = await openai.chat.completions.create({
+		model: 'gpt-5-mini',
+		messages: [
+			{ role: 'system', content: systemPrompt },
+			{ role: 'user', content: prompt || 'Create professional website content' },
+		],
+		temperature: 1,
+	});
 
-    const content = completion.choices[0].message.content;
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-        throw new Error('AI did not return valid JSON');
-    }
+	const content = completion.choices[0].message.content;
+	const jsonMatch = content.match(/\{[\s\S]*\}/);
+	if (!jsonMatch) {
+		throw new Error('AI did not return valid JSON');
+	}
 
-    let result = JSON.parse(jsonMatch[0]);
-    result = await processImages(result, variables);
+	let result = JSON.parse(jsonMatch[0]);
+	result = await processImages(result, variables);
 
-    return [
-        result,
-        {
-            promptTokens: completion.usage.prompt_tokens,
-            completionTokens: completion.usage.completion_tokens,
-            totalTokens: completion.usage.total_tokens,
-        },
-    ];
+	return [
+		result,
+		{
+			promptTokens: completion.usage.prompt_tokens,
+			completionTokens: completion.usage.completion_tokens,
+			totalTokens: completion.usage.total_tokens,
+		},
+	];
 };
 
 export const prepareBlock = async (block, prompt, country, language, navigation = null) => {
-    const [aiContent, tokens] = await generateBlockContent(
-        block.definition.variables,
-        block.category,
-        prompt,
-        country,
-        language,
-    );
+	const [aiContent, tokens] = await generateBlockContent(
+		block.definition.variables,
+		block.category,
+		prompt,
+		country,
+		language,
+	);
 
-    const variables = navigation
-        ? { ...aiContent, navigation }
-        : aiContent;
+	const variables = navigation ? { ...aiContent, navigation } : aiContent;
 
-    return { ...block, variables, tokens };
+	return { ...block, variables, tokens };
 };
-
 
 export const getBlocks = async (blocksList = []) => {
-    const results = await Promise.allSettled(
-        blocksList.map(blockDef => getBlockByType(blockDef.type))
-    );
+	const results = await Promise.allSettled(
+		blocksList.map((blockDef) => getBlockByType(blockDef.type)),
+	);
 
-    return results
-        .filter(r => r.status === 'fulfilled')
-        .map(r => r.value);
+	return results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
 };
 
-export const prepareGlobalBlocks = async (globalBlocks, templatePages, prompt, country, language) => {
-    let navigationLabels = null;
+export const prepareGlobalBlocks = async (
+	globalBlocks,
+	templatePages,
+	prompt,
+	country,
+	language,
+) => {
+	let navigationLabels = null;
 
-    const results = await Promise.allSettled(
-        globalBlocks.map(async (block) => {
-            const needsNavLabels = !navigationLabels && block.definition.variables.navigation;
+	const results = await Promise.allSettled(
+		globalBlocks.map(async (block) => {
+			const needsNavLabels = !navigationLabels && block.definition.variables.navigation;
 
-            const [aiContent, tokens] = await generateBlockContent(
-                block.definition.variables,
-                block.category,
-                prompt,
-                country,
-                language,
-                needsNavLabels ? templatePages : null
-            );
+			const [aiContent, tokens] = await generateBlockContent(
+				block.definition.variables,
+				block.category,
+				prompt,
+				country,
+				language,
+				needsNavLabels ? templatePages : null,
+			);
 
-            if (aiContent.navigationLabels) {
-                navigationLabels = aiContent.navigationLabels;
-                delete aiContent.navigationLabels;
-            }
+			if (aiContent.navigationLabels) {
+				navigationLabels = aiContent.navigationLabels;
+				delete aiContent.navigationLabels;
+			}
 
-            const navigation = {
-                type: "nav",
-                value: templatePages.map((page, index) => ({
-                    href: page.path === "/" ? "./index.html" : `.${page.path}.html`,
-                    label: navigationLabels?.[index] || page.title,
-                    active: false
-                }))
-            };
+			const navigation = {
+				type: 'nav',
+				value: templatePages.map((page, index) => ({
+					href: page.path === '/' ? './index.html' : `.${page.path}.html`,
+					label: navigationLabels?.[index] || page.title,
+					active: false,
+				})),
+			};
 
-            const variables = { ...aiContent, navigation };
-            // const html = nunjucks.renderString(block.html, variables);
+			const variables = { ...aiContent, navigation };
+			// const html = nunjucks.renderString(block.html, variables);
 
-            return { ...block, variables , tokens };
-        })
-    );
+			return { ...block, variables, tokens };
+		}),
+	);
 
-    return results
-        .filter(r => r.status === 'fulfilled')
-        .map(r => r.value);
+	return results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
 };
 
 // ==================== SEO ====================
 
 export const generatePageSeo = async (pageTitle, prompt, language, country) => {
-    const systemPrompt = `
+	const systemPrompt = `
 You are an SEO expert. Generate meta tags for a webpage.
 
 RULES:
@@ -280,52 +286,78 @@ Return JSON:
 All text in ${language}. Return ONLY valid JSON.
 `;
 
-    const completion = await openai.chat.completions.create({
-        model: 'gpt-5-mini',
-        messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: prompt || 'Create SEO for website' },
-        ],
-        temperature: 1,
-    });
+	const completion = await openai.chat.completions.create({
+		model: 'gpt-5-mini',
+		messages: [
+			{ role: 'system', content: systemPrompt },
+			{ role: 'user', content: prompt || 'Create SEO for website' },
+		],
+		temperature: 1,
+	});
 
-    const content = completion.choices[0].message.content;
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+	const content = completion.choices[0].message.content;
+	const jsonMatch = content.match(/\{[\s\S]*\}/);
 
-    const seo = jsonMatch
-        ? JSON.parse(jsonMatch[0])
-        : { title: pageTitle, description: '', keywords: '' };
+	const seo = jsonMatch
+		? JSON.parse(jsonMatch[0])
+		: { title: pageTitle, description: '', keywords: '' };
 
-    return [
-        seo,
-        {
-            promptTokens: completion.usage.prompt_tokens,
-            completionTokens: completion.usage.completion_tokens,
-            totalTokens: completion.usage.total_tokens,
-        }
-    ];
+	return [
+		seo,
+		{
+			promptTokens: completion.usage.prompt_tokens,
+			completionTokens: completion.usage.completion_tokens,
+			totalTokens: completion.usage.total_tokens,
+		},
+	];
 };
 
 // ==================== HTML BUILDER ====================
 
+const scopeCss = (css, blockId) => {
+	if (!css) return '';
+
+	return css.replace(/([^{]+)({[^}]*})/g, (match, selectors, contents) => {
+		const scopedSelectors = selectors
+			.split(',')
+			.map((sel) => {
+				const trimmed = sel.trim();
+				if (
+					!trimmed ||
+					trimmed.startsWith('@') ||
+					trimmed.startsWith('from') ||
+					trimmed.startsWith('to')
+				) {
+					return trimmed;
+				}
+				return `#${blockId} ${trimmed}`;
+			})
+			.join(', ');
+
+		return `${scopedSelectors} ${contents}\n`;
+	});
+};
+
 export const buildPageHtml = (page, globalCss, language, country) => {
-    const filledBlocks = page.blocks.map((block, blockIndex) => {
-        return {
-            ...block,
-            html: nunjucks.renderString(block.html, {
-                ...block.variables,
-                _blockId: `${block.category}:${block.id}:${block.pageIndex}:${blockIndex}`
-            }),
-        };
-    })
-    const blocksHtml = filledBlocks.map(b => b.html).join('\n');
-    const blocksCss = filledBlocks.map(b => b.css).join('\n');
+	const filledBlocks = page.blocks.map((block, blockIndex) => {
+		const id = `${block.category}-${block.id}-${block.pageIndex}-${blockIndex}`;
+		const scopedCss = scopeCss(block.css, id);
+		return {
+			...block,
+			scopedCss,
+			html: nunjucks.renderString(block.html, {
+				...block.variables,
+				_blockId: id,
+			}),
+		};
+	});
+	const blocksHtml = filledBlocks.map((b) => b.html).join('\n');
+	const blocksCss = filledBlocks.map((b) => b.scopedCss).join('\n');
+	const cssVariables = Object.entries(globalCss || {})
+		.map(([key, value]) => `${key}: ${value};`)
+		.join('\n    ');
 
-    const cssVariables = Object.entries(globalCss || {})
-        .map(([key, value]) => `${key}: ${value};`)
-        .join('\n    ');
-
-    return `<!DOCTYPE html>
+	return `<!DOCTYPE html>
 <html lang="${language}">
 <head>
     <meta charset="UTF-8">
@@ -335,20 +367,20 @@ export const buildPageHtml = (page, globalCss, language, country) => {
     <meta name="geo.placename" content="${country.toUpperCase()}">
     <meta name="content-language" content="${language}">
     
-    <title>${page.title}</title>
-    <meta name="description" content="${page.description || ''}">
-    <meta name="keywords" content="${page.keywords || ''}">
+    <title>${page.seo.title}</title>
+    <meta name="description" content="${page.seo.description || ''}">
+    <meta name="keywords" content="${page.seo.keywords || ''}">
     
     <!-- Open Graph -->
-    <meta property="og:title" content="${page.title}">
-    <meta property="og:description" content="${page.description || ''}">
+    <meta property="og:title" content="${page.seo.title}">
+    <meta property="og:description" content="${page.seo.description || ''}">
     <meta property="og:type" content="website">
     <meta property="og:locale" content="${language}_${country.toUpperCase()}">
     
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="${page.title}">
-    <meta name="twitter:description" content="${page.description || ''}">
+    <meta name="twitter:title" content="${page.seo.title}">
+    <meta name="twitter:description" content="${page.seo.description || ''}">
     
     <style>
         :root {
@@ -378,17 +410,17 @@ export const buildPageHtml = (page, globalCss, language, country) => {
 };
 
 export const buildSitePages = (pages, globalCss, language, country) => {
-    return pages.map(page => ({
-        filename: page.path === "/" ? "index.html" : `${page.path.slice(1)}.html`,
-        html: buildPageHtml(page, globalCss, language, country)
-    }));
+	return pages.map((page) => ({
+		filename: page.path === '/' ? 'index.html' : `${page.path.slice(1)}.html`,
+		html: buildPageHtml(page, globalCss, language, country),
+	}));
 };
 
 export const generateTheme = async (prompt) => {
-    const cssThemePath = path.join(process.cwd(), 'src/const/css-theme.txt');
-    const cssVariablesText = await fs.readFile(cssThemePath, 'utf-8');
+	const cssThemePath = path.join(process.cwd(), 'src/const/css-theme.txt');
+	const cssVariablesText = await fs.readFile(cssThemePath, 'utf-8');
 
-    const systemPrompt = `You are a web designer. Create a CSS theme.
+	const systemPrompt = `You are a web designer. Create a CSS theme.
 
 Website description: ${prompt}
 
@@ -403,53 +435,53 @@ Return JSON with all variables and their CSS values. Example:
 
 Return only JSON.`;
 
-    const completion = await openai.chat.completions.create({
-        model: 'gpt-5-mini',
-        messages: [
-            {
-                role: 'system',
-                content: systemPrompt
-            },
-            {
-                role: 'user',
-                content: prompt
-            }
-        ],
-        temperature: 1,
-    });
+	const completion = await openai.chat.completions.create({
+		model: 'gpt-5-mini',
+		messages: [
+			{
+				role: 'system',
+				content: systemPrompt,
+			},
+			{
+				role: 'user',
+				content: prompt,
+			},
+		],
+		temperature: 1,
+	});
 
-    const content = completion.choices[0].message.content;
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+	const content = completion.choices[0].message.content;
+	const jsonMatch = content.match(/\{[\s\S]*\}/);
 
-    if (!jsonMatch) {
-        throw new Error('AI did not return valid JSON for theme');
-    }
+	if (!jsonMatch) {
+		throw new Error('AI did not return valid JSON for theme');
+	}
 
-    let theme;
-    try {
-        theme = JSON.parse(jsonMatch[0]);
-    } catch (e) {
-        throw new Error('Failed to parse theme JSON from AI response');
-    }
+	let theme;
+	try {
+		theme = JSON.parse(jsonMatch[0]);
+	} catch (e) {
+		throw new Error('Failed to parse theme JSON from AI response');
+	}
 
-    return {
-        theme,
-        tokens: {
-            promptTokens: completion.usage.prompt_tokens,
-            completionTokens: completion.usage.completion_tokens,
-            totalTokens: completion.usage.total_tokens,
-        }
-    };
+	return {
+		theme,
+		tokens: {
+			promptTokens: completion.usage.prompt_tokens,
+			completionTokens: completion.usage.completion_tokens,
+			totalTokens: completion.usage.total_tokens,
+		},
+	};
 };
 
 export const flatPageBlocks = (pages) => {
-    return pages.reduce((flatBlocks, page, pageIndex) => {
-        const pageBlocks = (page?.layout ?? []).map((blockDef, blockIndex) => ({
-            blockIndex: blockIndex,
-            pageIndex: pageIndex,
-            ...blockDef,
-        }));
+	return pages.reduce((flatBlocks, page, pageIndex) => {
+		const pageBlocks = (page?.layout ?? []).map((blockDef, blockIndex) => ({
+			blockIndex: blockIndex,
+			pageIndex: pageIndex,
+			...blockDef,
+		}));
 
-        return [...flatBlocks, ...pageBlocks];
-    }, []);
+		return [...flatBlocks, ...pageBlocks];
+	}, []);
 };
