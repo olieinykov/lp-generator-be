@@ -16,8 +16,6 @@ fal.config({
     credentials: process.env.FAL_KEY,
 });
 
-// ==================== ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЙ ====================
-
 const generateImageWithFal = async (prompt) => {
     try {
         const result = await fal.subscribe('fal-ai/flux/schnell', {
@@ -205,18 +203,9 @@ export const prepareBlock = async (block, prompt, country, language, navigation 
         ? { ...aiContent, navigation }
         : aiContent;
 
-    console.log("variables", variables);
-    console.log("block", block);
-
-    // const html = nunjucks.renderString(block.html, {
-    //     ...variables,
-    //     _blockId: `${block.id}:${block.category}`
-    // });
-
     return { ...block, variables, tokens };
 };
 
-// ==================== СОСТАВНЫЕ ОПЕРАЦИИ ====================
 
 export const getBlocks = async (blocksList = []) => {
     const results = await Promise.allSettled(
@@ -396,11 +385,8 @@ export const buildSitePages = (pages, globalCss, language, country) => {
 };
 
 export const generateTheme = async (prompt) => {
-    console.log("process.cwd()", process.cwd())
     const cssThemePath = path.join(process.cwd(), 'src/const/css-theme.txt');
-    console.log("cssVariablesText", cssThemePath)
     const cssVariablesText = await fs.readFile(cssThemePath, 'utf-8');
-    console.log("cssVariablesText", cssVariablesText)
 
     const systemPrompt = `You are a web designer. Create a CSS theme.
 
