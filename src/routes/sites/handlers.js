@@ -159,6 +159,10 @@ export const createSite = async (request, reply) => {
 		const totalPrice = inputPrice + outputPrice;
 
 
+		// 1. Return back SEO generation
+		// 2. Return previews back
+		// 3. Assign #id to styles
+		// 4. Improve parallel thingy
 		const sitePages = buildSitePages(pages, globalCss, language, country);
 		console.log("sitePages =>", sitePages);
 		const zip = new AdmZip();
@@ -209,7 +213,10 @@ export const createSite = async (request, reply) => {
 			.returning();
 
 		return reply.status(201).send({
-			data: siteData,
+			data: {
+				...siteData,
+				previews: [],
+			},
 			success: true,
 		});
 	} catch (error) {
