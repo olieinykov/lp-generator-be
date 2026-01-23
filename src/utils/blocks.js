@@ -4,6 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { downloadAndUnzipBlock } from './zipHandler.js';
 import OpenAI from 'openai';
 import * as fal from '@fal-ai/serverless-client';
+import * as sass from 'sass';
 import nunjucks from 'nunjucks';
 import fs from 'fs/promises';
 import path from 'path';
@@ -314,28 +315,15 @@ All text in ${language}. Return ONLY valid JSON.
 
 // ==================== HTML BUILDER ====================
 
-const scopeCss = (css, blockId) => {
-	if (!css) return '';
-
-	return css.replace(/([^{]+)({[^}]*})/g, (match, selectors, contents) => {
-		const scopedSelectors = selectors
-			.split(',')
-			.map((sel) => {
-				const trimmed = sel.trim();
-				if (
-					!trimmed ||
-					trimmed.startsWith('@') ||
-					trimmed.startsWith('from') ||
-					trimmed.startsWith('to')
-				) {
-					return trimmed;
-				}
-				return `#${blockId} ${trimmed}`;
-			})
-			.join(', ');
-
-		return `${scopedSelectors} ${contents}\n`;
-	});
+const scopeCss = (scss, blockId) => {
+	try {
+		const replacedScss = scss.replace(/#blockId/g, `#${blockId}`);
+		const result = sass.compileString(replacedScss);
+		return result.css;
+	} catch (error) {
+		console.error(`${blockId}:`, error);
+		return '';
+	}
 };
 
 export const buildPageHtml = (page, globalCss, language, country) => {

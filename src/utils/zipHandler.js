@@ -1,4 +1,4 @@
-import AdmZip from "adm-zip";
+import AdmZip from 'adm-zip';
 
 export async function downloadAndUnzipBlock(archiveUrl) {
 	const response = await fetch(archiveUrl);
@@ -17,7 +17,7 @@ export async function downloadAndUnzipBlock(archiveUrl) {
 			blockData.definition = JSON.parse(content);
 		} else if (entry.entryName === 'index.njk') {
 			blockData.html = content;
-		} else if (entry.entryName === 'styles.css') {
+		} else if (entry.entryName === 'styles.scss') {
 			blockData.css = content;
 		}
 	});

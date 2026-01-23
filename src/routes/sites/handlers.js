@@ -45,22 +45,26 @@ export const createSite = async (request, reply) => {
 		tokensInfo.totalCompletionTokens += themeTokens.completionTokens;
 		tokensInfo.totalTokens += themeTokens.totalTokens;
 
-		const seoData = [];
-
-		const seoResults = await Promise.all(
+		const seoData = await Promise.all(
 			template.definition.pages.map(async (page) => {
-				const [seo, tokens] = await generatePageSeo(page.title, prompt, language, country);
-				tokensInfo.totalPromptTokens += tokens.promptTokens;
-				tokensInfo.totalCompletionTokens += tokens.completionTokens;
-				tokensInfo.totalTokens += tokens.totalTokens;
-				return {
-					...seo,
-				};
+				try {
+					const [seo, tokens] = await generatePageSeo(
+						page.title,
+						prompt,
+						language,
+						country,
+					);
+					tokensInfo.totalPromptTokens += tokens.promptTokens;
+					tokensInfo.totalCompletionTokens += tokens.completionTokens;
+					tokensInfo.totalTokens += tokens.totalTokens;
+					return {
+						...seo,
+					};
+				} catch (err) {
+					return err;
+				}
 			}),
 		);
-		seoResults.forEach((seo) => {
-			seoData.push(seo);
-		});
 		const globalCss = {
 			...generatedTheme,
 			// ...(template?.definition?.globals?.css || {})
@@ -177,7 +181,6 @@ export const createSite = async (request, reply) => {
 		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
 		const totalPrice = inputPrice + outputPrice;
 
-		// 1. Improve parallel thingy
 		const sitePages = buildSitePages(pages, globalCss, language, country);
 		console.log('sitePages =>', sitePages);
 		const zip = new AdmZip();
