@@ -4,11 +4,7 @@ import { randomBytes } from 'crypto';
 import path from 'path';
 
 // Required files for web template
-const REQUIRED_FILES = [
-	'index.njk',
-	'styles.css',
-	'definition.json',
-];
+const REQUIRED_FILES = ['index.njk', 'styles.scss', 'definition.json'];
 
 const ALLOWED_EXTENSIONS = ['.zip'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -65,9 +61,43 @@ async function validateFileContent(filename, buffer) {
 			}
 			break;
 
-		case 'styles.css':
-			if (content.trim().length === 0) {
+		case 'styles.scss':
+			const trimmedContent = content.trim();
+
+			if (trimmedContent.length === 0) {
 				throw new Error(`File ${filename} cannot be empty`);
+			}
+			const startsWithId = trimmedContent.startsWith('#blockId');
+			const endsWithBrace = trimmedContent.endsWith('}');
+
+			if (!startsWithId || !endsWithBrace) {
+				throw new Error(
+					`Style validation error: The ${filename} file must start with #blockId { and end with }`,
+				);
+			}
+
+			let braceCount = 0;
+			let opened = false;
+			let validEncapsulation = true;
+
+			for (let i = 0; i < trimmedContent.length; i++) {
+				const char = trimmedContent[i];
+				if (char === '{') {
+					braceCount++;
+					opened = true;
+				} else if (char === '}') {
+					braceCount--;
+				}
+				if (opened && braceCount === 0 && i < trimmedContent.length - 1) {
+					validEncapsulation = false;
+					break;
+				}
+			}
+
+			if (!validEncapsulation || braceCount !== 0) {
+				throw new Error(
+					`Style validation error: All styles in ${filename} must be nested INSIDE the #blockId { ... } selector. Found code outside the main block.`,
+				);
 			}
 			break;
 
