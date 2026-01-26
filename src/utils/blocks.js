@@ -333,9 +333,9 @@ All text in ${language}. Return ONLY valid JSON.
 
 const scopeCss = (scss, blockId) => {
 	try {
-		const replacedScss = scss.replace(/#blockId/g, `#${blockId}`);
+		const replacedScss = scss.replace(/#_blockId/g, `#${blockId}`);
 		const result = sass.compileString(replacedScss);
-		return `/* <<<---- SCOPED STYLES FOR BLOCK ${blockId} START ---->>> */\n${result.css}\n/* <<<---- SCOPED STYLES FOR BLOCK ${blockId} END ---->>> */`;
+		return result.css;
 	} catch (error) {
 		console.error(`${blockId}:`, error);
 		return '';
@@ -393,21 +393,51 @@ export const updatePageContentRegex = (pagesData, previousBlockId, templatePages
 	});
 };
 
-export const buildPageHtml = (page, globalCss, language, country) => {
-	const filledBlocks = page.blocks.map((block, blockIndex) => {
-		const id = `${block.category}-${block.id}-${block.pageIndex}-${blockIndex}`;
-		const scopedCss = scopeCss(block.css, id);
-		return {
-			...block,
-			scopedCss,
-			html: nunjucks.renderString(block.html, {
-				...block.variables,
-				_blockId: id,
-			}),
-		};
-	});
-	const blocksHtml = filledBlocks.map((b) => b.html).join('\n');
-	const blocksCss = filledBlocks.map((b) => b.scopedCss).join('\n');
+const processBlockRecursive = (block, blockIndex, pageIndex) => {
+	if (!block || block.hasError) return { html: '', css: '' };
+
+	const id = `${block.category}-${block.id}-${pageIndex}-${blockIndex}`;
+
+	let currentHtml = nunjucks
+		.renderString(block.html, {
+			...block.variables,
+			_blockId: id,
+		})
+		.trim();
+	let blockCssStart = `/* <<<---- SCOPED STYLES FOR BLOCK ${id} START ---->>> */\n`;
+	let blockCssEnd = `\n/* <<<---- SCOPED STYLES FOR BLOCK ${id} END ---->>> */`;
+	let totalCss = scopeCss(block.css, id);
+
+	if (block.childrenBlock) {
+		const childResult = processBlockRecursive(block.childrenBlock, blockIndex + 1, pageIndex);
+		const match = currentHtml.match(/<\/[^>]+>$/);
+
+		if (match) {
+			const insertIndex = match.index;
+			currentHtml =
+				currentHtml.slice(0, insertIndex) +
+				`\n  ${childResult.html}\n` +
+				currentHtml.slice(insertIndex);
+		} else {
+			currentHtml += childResult.html;
+		}
+
+		totalCss += `\n${childResult.css}`;
+	}
+
+	return {
+		html: currentHtml,
+		css: `${blockCssStart}${totalCss}${blockCssEnd}`,
+	};
+};
+
+export const buildPageHtml = (page, globalCss, language, country, pageIndex) => {
+	const renderedBlocks = page.blocks.map((block, idx) =>
+		processBlockRecursive(block, idx, pageIndex),
+	);
+
+	const blocksHtml = renderedBlocks.map((b) => b.html).join('\n');
+	const blocksCss = renderedBlocks.map((b) => b.css).join('\n');
 	const cssVariables = Object.entries(globalCss || {})
 		.map(([key, value]) => `${key}: ${value};`)
 		.join('\n    ');
@@ -421,40 +451,40 @@ export const buildPageHtml = (page, globalCss, language, country) => {
     <meta name="geo.region" content="${country.toUpperCase()}">
     <meta name="geo.placename" content="${country.toUpperCase()}">
     <meta name="content-language" content="${language}">
-    
+
     <title>${page.seo.title}</title>
     <meta name="description" content="${page.seo.description || ''}">
     <meta name="keywords" content="${page.seo.keywords || ''}">
-    
+
     <!-- Open Graph -->
     <meta property="og:title" content="${page.seo.title}">
     <meta property="og:description" content="${page.seo.description || ''}">
     <meta property="og:type" content="website">
     <meta property="og:locale" content="${language}_${country.toUpperCase()}">
-    
+
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="${page.seo.title}">
     <meta name="twitter:description" content="${page.seo.description || ''}">
-    
+
     <style>
         :root {
             ${cssVariables}
         }
-        
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-       
+
         body {
             font-family: var(--font-body, sans-serif);
             color: var(--color-text, #333);
             background-color: var(--color-background, #fff);
             line-height: var(--line-height-normal, 1.6);
         }
-        
+
         ${blocksCss}
     </style>
 </head>
@@ -465,9 +495,9 @@ export const buildPageHtml = (page, globalCss, language, country) => {
 };
 
 export const buildSitePages = (pages, globalCss, language, country) => {
-	return pages.map((page) => ({
+	return pages.map((page, idx) => ({
 		filename: page.path === '/' ? 'index.html' : `${page.path.slice(1)}.html`,
-		html: buildPageHtml(page, globalCss, language, country),
+		html: buildPageHtml(page, globalCss, language, country, idx),
 	}));
 };
 

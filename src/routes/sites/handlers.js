@@ -8,7 +8,6 @@ import { PRICE_FOR_PROMPTS } from '../../config/constants.js';
 import slugify from 'slugify';
 import {
 	buildSitePages,
-	flatPageBlocks,
 	generatePageSeo,
 	generateTheme,
 	getBlockById,
@@ -88,98 +87,73 @@ export const createSite = async (request, reply) => {
 		});
 
 		const globalBlocksMap = new Map(preparedGlobalBlocks.map((b) => [b.category, b]));
-		const pagesBlocks = flatPageBlocks(template.definition.pages);
-		const generatedBlocks = await Promise.allSettled(
-			pagesBlocks.map(async (blockDef) => {
-				const isGlobal = globalBlocksMap.has(blockDef.type);
-				const baseInfo = {
-					pageIndex: blockDef.pageIndex,
-					blockType: blockDef.type,
-					isGlobal,
+
+		const processBlock = async (blockDef, context) => {
+			const { globalBlocksMap, prompt, country, language, tokensInfo } = context;
+
+			const isGlobal = globalBlocksMap.has(blockDef.type);
+			const baseInfo = {
+				blockType: blockDef.type,
+				isGlobal,
+			};
+
+			try {
+				let currentBlock;
+
+				if (isGlobal) {
+					currentBlock = { ...globalBlocksMap.get(blockDef.type), ...baseInfo };
+				} else {
+					const block = await getBlockByType(blockDef.type);
+					const preparedBlock = await prepareBlock(block, prompt, country, language);
+
+					tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
+					tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
+					tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
+
+					currentBlock = { ...preparedBlock, ...baseInfo, hasError: false };
+				}
+
+				if (blockDef.childrenBlock) {
+					currentBlock.childrenBlock = await processBlock(
+						blockDef.childrenBlock,
+						context,
+					);
+				}
+
+				return {
+					...baseInfo,
+					...currentBlock,
+				};
+			} catch (error) {
+				return {
+					...baseInfo,
+					hasError: true,
+					error: error.message,
+				};
+			}
+		};
+
+		const pages = await Promise.all(
+			template.definition.pages.map(async (page, pageIndex) => {
+				const context = {
+					globalBlocksMap,
+					prompt,
+					country,
+					language,
+					tokensInfo,
 				};
 
-				try {
-					// For debug error case
-					// if (blockDef.type === "info") {
-					// 	throw new Error("My custom error")
-					// }
-					if (isGlobal) {
-						const block = globalBlocksMap.get(blockDef.type);
-						return {
-							...baseInfo,
-							...block,
-						};
-					} else {
-						const block = await getBlockByType(blockDef.type);
-						const preparedBlock = await prepareBlock(block, prompt, country, language);
+				const blocks = await Promise.all(
+					page.layout.map((blockDef) => processBlock(blockDef, context)),
+				);
 
-						tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
-						tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
-						tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
-
-						return {
-							hasError: false,
-							...baseInfo,
-							...preparedBlock,
-						};
-					}
-				} catch (error) {
-					return {
-						...baseInfo,
-						error: error.message,
-						hasError: true,
-					};
-				}
-			}),
-		);
-		const pagesWithBlocks = generatedBlocks.map((blockResult) => blockResult.value);
-		const pages = template.definition.pages.reduce((acc, page, pageIndex) => {
-			const blocks = pagesWithBlocks.filter((block) => block.pageIndex === pageIndex);
-			return [
-				...acc,
-				{
+				return {
 					...page,
 					blocks,
 					seo: seoData[pageIndex],
-				},
-			];
-		}, []);
-
-		// const pages = await Promise.all(
-		// 	template.definition.pages.map(async (pageConfig) => {
-		// 		const blocks = [];
-		//
-		// 		for (const blockDef of pageConfig.layout) {
-		// 			if (globalBlocksMap.has(blockDef.type)) {
-		// 				blocks.push(globalBlocksMap.get(blockDef.type));
-		// 			} else {
-		// 				const block = await getBlockByType(blockDef.type);
-		// 				const filledBlock = await fillBlock(block, prompt, country, language);
-		//
-		// 				tokensInfo.totalPromptTokens += filledBlock.tokens.promptTokens;
-		// 				tokensInfo.totalCompletionTokens += filledBlock.tokens.completionTokens;
-		// 				tokensInfo.totalTokens += filledBlock.tokens.totalTokens;
-		//
-		// 				blocks.push(filledBlock);
-		// 			}
-		// 		}
-		//
-		// 		const [seo, seoTokens] = await generatePageSeo(pageConfig.title, prompt, language, country);
-		//
-		// 		tokensInfo.totalPromptTokens += seoTokens.promptTokens;
-		// 		tokensInfo.totalCompletionTokens += seoTokens.completionTokens;
-		// 		tokensInfo.totalTokens += seoTokens.totalTokens;
-		//
-		// 		return {
-		// 			title: seo.title,
-		// 			description: seo.description,
-		// 			keywords: seo.keywords,
-		// 			path: pageConfig.path,
-		// 			blocks
-		// 		};
-		// 	})
-		// );
-
+				};
+			}),
+		);
 		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
 		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
 		const totalPrice = inputPrice + outputPrice;
