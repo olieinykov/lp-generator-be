@@ -122,14 +122,33 @@ export const regenerateSiteSchema = {
 		},
 		required: ['siteId'],
 	},
+};
+
+export const regenerateBlockSchema = {
+	tags: ['Sites'],
+	summary: 'Activate generated site',
+	description: 'Activate generated site',
+	params: {
+		type: 'object',
+		properties: {
+			siteId: { type: 'integer' },
+			blockId: { type: 'integer' },
+		},
+		required: ['siteId', 'blockId'],
+	},
 	body: {
 		type: 'object',
-		required: ['prompt'],
 		properties: {
-			prompt: {
-				type: 'string',
-				maxLength: 5000,
+			regeneratingPagesPath: {
+				type: 'array',
+				items: {
+					type: 'string',
+				},
+			},
+			blockIndex: {
+				type: 'integer',
 			},
 		},
+		required: ['regeneratingPagesPath', 'blockIndex'],
 	},
 };

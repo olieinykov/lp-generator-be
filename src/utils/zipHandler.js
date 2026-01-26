@@ -24,3 +24,24 @@ export async function downloadAndUnzipBlock(archiveUrl) {
 
 	return blockData;
 }
+
+export async function extractHtmlFiles(archiveUrl) {
+	const response = await fetch(archiveUrl);
+	const arrayBuffer = await response.arrayBuffer();
+	const buffer = Buffer.from(arrayBuffer);
+
+	const zip = new AdmZip(buffer);
+	const zipEntries = zip.getEntries();
+
+	const htmlFiles = zipEntries.map((entry) => {
+		const nameWithoutExtension = entry.name.replace(/\.html$/i, '');
+		const pagePath = nameWithoutExtension === 'index' ? '/' : `/${nameWithoutExtension}`;
+		return {
+			nameWithoutExtension,
+			path: pagePath,
+			content: entry.getData().toString('utf8'),
+		};
+	});
+
+	return htmlFiles;
+}

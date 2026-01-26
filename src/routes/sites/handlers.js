@@ -11,11 +11,14 @@ import {
 	flatPageBlocks,
 	generatePageSeo,
 	generateTheme,
+	getBlockById,
 	getBlockByType,
 	getBlocks,
 	prepareBlock,
 	prepareGlobalBlocks,
+	updatePageContentRegex,
 } from '../../utils/blocks.js';
+import { extractHtmlFiles } from '../../utils/zipHandler.js';
 
 function cutNumber(number, amountAfterDot) {
 	const factor = 10 ** amountAfterDot;
@@ -443,10 +446,10 @@ export const regenerateSite = async (request, reply) => {
 			promptTokens: promptTokensDB,
 			completionTokens: completionTokensDB,
 		} = result;
-		// 		const template = await db.query.templates.findFirst({
-		// 			where: eq(templates.id, definition),
-		// 		});
-		//
+		const template = await db.query.templates.findFirst({
+			where: eq(templates.id, definition),
+		});
+
 		// 		if (!template || !template.definition?.blocks) {
 		// 			return reply.status(404).send({ error: 'Template not found' });
 		// 		}
@@ -604,6 +607,141 @@ export const regenerateSite = async (request, reply) => {
 		// 			},
 		// 			success: true,
 		// 		});
+	} catch (err) {
+		reply.status(500).send({
+			error: err.message,
+			success: false,
+		});
+	}
+};
+
+export const regenerateBlock = async (request, reply) => {
+	try {
+		const { siteId, blockId } = request.params;
+		const { regeneratingPagesPath, blockIndex } = request.body;
+
+		const [result] = await db.select().from(sites).where(eq(sites.id, siteId));
+		const {
+			name,
+			prompt,
+			definition,
+			country,
+			language,
+			archiveUrl,
+			totalTokens: totalTokensDB,
+			promptTokens: promptTokensDB,
+			completionTokens: completionTokensDB,
+		} = result;
+		const template = await db.query.templates.findFirst({
+			where: eq(templates.id, definition),
+		});
+
+		if (!template) {
+			return reply.status(404).send({ error: 'Template not found' });
+		}
+
+		const tokensInfo = {
+			totalPromptTokens: promptTokensDB,
+			totalCompletionTokens: completionTokensDB,
+			totalTokens: totalTokensDB,
+		};
+		let isGlobalBlock = false;
+		const htmlPagesPath = await extractHtmlFiles(archiveUrl);
+		const currentBlock = await getBlockById(blockId);
+		const newBlock = await getBlockByType(currentBlock.category);
+		let generatedBlock;
+
+		if (
+			template.definition.globals.blocks.some(
+				(tmpBlock) => tmpBlock.type === newBlock.category,
+			)
+		) {
+			const [preparedGlobalBlocks] = await prepareGlobalBlocks(
+				[newBlock],
+				template?.definition?.pages,
+				prompt,
+				country,
+				language,
+			);
+			isGlobalBlock = true;
+
+			tokensInfo.totalPromptTokens += preparedGlobalBlocks.tokens.promptTokens;
+			tokensInfo.totalCompletionTokens += preparedGlobalBlocks.tokens.completionTokens;
+			tokensInfo.totalTokens += preparedGlobalBlocks.tokens.totalTokens;
+
+			generatedBlock = preparedGlobalBlocks;
+		} else {
+			const preparedBlock = await prepareBlock(newBlock, prompt, country, language);
+
+			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
+			tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
+			tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
+
+			generatedBlock = preparedBlock;
+		}
+
+		htmlPagesPath.forEach((p) => {
+			if (isGlobalBlock || regeneratingPagesPath.includes(p.path)) {
+				p.block = generatedBlock;
+			}
+		});
+		const newHTML = updatePageContentRegex(
+			htmlPagesPath,
+			currentBlock.id,
+			template.definition.pages,
+			blockIndex,
+		);
+
+		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
+		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+		const totalPrice = inputPrice + outputPrice;
+
+		const zip = new AdmZip();
+		newHTML.forEach((page) => {
+			zip.addFile(`${page.nameWithoutExtension}.html`, Buffer.from(page.html, 'utf8'));
+		});
+		const zipBuffer = zip.toBuffer();
+
+		const safeName = slugify(`site-${name}-${new Date().getTime()}.zip`, {
+			lower: true,
+			strict: true,
+		});
+
+		const { error: uploadError } = await supabase.storage
+			.from('sites')
+			.upload(safeName, zipBuffer, {
+				contentType: 'application/zip',
+				upsert: false,
+			});
+
+		if (uploadError) {
+			throw uploadError;
+		}
+
+		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(safeName);
+
+		const [siteData] = await db
+			.update(sites)
+			.set({
+				archiveUrl: urlData.publicUrl,
+				updatedAt: new Date(),
+				promptTokens: tokensInfo.totalPromptTokens,
+				completionTokens: tokensInfo.totalCompletionTokens,
+				totalTokens: tokensInfo.totalTokens,
+				inputUsdPrice: inputPrice,
+				outputUsdPrice: outputPrice,
+				totalUsdPrice: totalPrice,
+			})
+			.where(eq(sites.id, siteId))
+			.returning();
+
+		return reply.send({
+			data: {
+				...siteData,
+				previews: newHTML.map((page) => page.html),
+			},
+			success: true,
+		});
 	} catch (err) {
 		reply.status(500).send({
 			error: err.message,

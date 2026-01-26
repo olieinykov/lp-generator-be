@@ -78,6 +78,22 @@ export const getBlockByType = async (type) => {
 	};
 };
 
+export const getBlockById = async (id) => {
+	const [block] = await db.select().from(blocks).where(eq(blocks.id, id)).limit(1);
+
+	if (!block) {
+		throw new Error(`No active block found with id: ${id}`);
+	}
+
+	const unzippedBlock = await downloadAndUnzipBlock(block.archiveUrl);
+
+	return {
+		category: block.category,
+		id: block.id,
+		...unzippedBlock,
+	};
+};
+
 export const generateBlockContent = async (
 	variables,
 	blockCategory,
@@ -319,11 +335,62 @@ const scopeCss = (scss, blockId) => {
 	try {
 		const replacedScss = scss.replace(/#blockId/g, `#${blockId}`);
 		const result = sass.compileString(replacedScss);
-		return result.css;
+		return `/* <<<---- SCOPED STYLES FOR BLOCK ${blockId} START ---->>> */\n${result.css}\n/* <<<---- SCOPED STYLES FOR BLOCK ${blockId} END ---->>> */`;
 	} catch (error) {
 		console.error(`${blockId}:`, error);
 		return '';
 	}
+};
+
+const replaceHtmlById = (fullHtml, id, newBlockHtml) => {
+	const regex = new RegExp(`(<(\\w+)[^>]*id="${id}"[^>]*)([\\s\\S]*?)(<\\/\\2>)`, 'g');
+
+	return fullHtml.replace(regex, newBlockHtml);
+};
+
+const replaceCssInHtml = (fullHtml, id, newScopedCss) => {
+	const startComment = `/* <<<---- SCOPED STYLES FOR BLOCK ${id} START ---->>> */`;
+	const endComment = `/* <<<---- SCOPED STYLES FOR BLOCK ${id} END ---->>> */`;
+
+	const escapedStart = startComment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const escapedEnd = endComment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+	const regex = new RegExp(`${escapedStart}[\\s\\S]*?${escapedEnd}`, 'g');
+
+	if (fullHtml.includes(startComment)) {
+		return fullHtml.replace(regex, newScopedCss);
+	} else {
+		return fullHtml.replace('</style>', `\n${newScopedCss}\n</style>`);
+	}
+};
+
+const getBlockIndices = (templatePages, pagePath) => {
+	const pageIndex = templatePages.findIndex((p) => p.path === pagePath);
+	return pageIndex;
+};
+
+export const updatePageContentRegex = (pagesData, previousBlockId, templatePages, blockIndex) => {
+	return pagesData.map((pageData) => {
+		let { content: html, block, path, nameWithoutExtension } = pageData;
+		if (!block) {
+			return { nameWithoutExtension, path, html };
+		} else {
+			const pageIndex = getBlockIndices(templatePages, path, block.category, block.id);
+			const prevId = `${block.category}-${previousBlockId}-${pageIndex}-${blockIndex}`;
+			const currentId = `${block.category}-${block.id}-${pageIndex}-${blockIndex}`;
+
+			const newScopedCss = scopeCss(block.css, currentId);
+			const newBlockHtml = nunjucks.renderString(block.html, {
+				...block.variables,
+				_blockId: currentId,
+			});
+
+			html = replaceCssInHtml(html, prevId, newScopedCss);
+			html = replaceHtmlById(html, prevId, newBlockHtml);
+
+			return { nameWithoutExtension, path, html };
+		}
+	});
 };
 
 export const buildPageHtml = (page, globalCss, language, country) => {
