@@ -2,6 +2,8 @@
 import AdmZip from 'adm-zip';
 import { randomBytes } from 'crypto';
 import path from 'path';
+import slugify from 'slugify';
+import { supabase } from '../db/connection.js';
 
 // Required files for web template
 const REQUIRED_FILES = ['index.njk', 'styles.scss', 'definition.json'];
@@ -67,7 +69,7 @@ async function validateFileContent(filename, buffer) {
 			if (trimmedContent.length === 0) {
 				throw new Error(`File ${filename} cannot be empty`);
 			}
-			const startsWithId = trimmedContent.startsWith('#blockId');
+			const startsWithId = trimmedContent.startsWith('#_blockId');
 			const endsWithBrace = trimmedContent.endsWith('}');
 
 			if (!startsWithId || !endsWithBrace) {
@@ -96,7 +98,7 @@ async function validateFileContent(filename, buffer) {
 
 			if (!validEncapsulation || braceCount !== 0) {
 				throw new Error(
-					`Style validation error: All styles in ${filename} must be nested INSIDE the #blockId { ... } selector. Found code outside the main block.`,
+					`Style validation error: All styles in ${filename} must be nested INSIDE the #_blockId { ... } selector. Found code outside the main block.`,
 				);
 			}
 			break;
@@ -228,7 +230,6 @@ export async function quickValidate(buffer) {
 			.map((entry) => entry.entryName);
 
 		const missingFiles = REQUIRED_FILES.filter((file) => {
-			console.log('file ==>', file);
 			return !fileList.includes(file);
 		});
 
@@ -262,4 +263,36 @@ export default {
 	extractAndValidate,
 	generateArchiveName,
 	constants: archiveConstants,
+};
+
+export const replaceSiteZipWithNew = async (sitePages, siteName, existingArchiveUrl) => {
+	const zip = new AdmZip();
+	sitePages.forEach((page) => {
+		zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
+	});
+	const zipBuffer = zip.toBuffer();
+
+	const safeName = slugify(`site-${siteName}-${new Date().getTime()}.zip`, {
+		lower: true,
+		strict: true,
+	});
+
+	const { error: uploadError } = await supabase.storage
+		.from('sites')
+		.upload(safeName, zipBuffer, {
+			contentType: 'application/zip',
+		});
+
+	if (uploadError) {
+		throw uploadError;
+	}
+
+	const { data: urlData } = supabase.storage.from('sites').getPublicUrl(safeName);
+
+	const oldArchiveName = existingArchiveUrl?.split('/').pop();
+	if (oldArchiveName) {
+		await supabase.storage.from('sites').remove([oldArchiveName]);
+	}
+
+	return urlData;
 };

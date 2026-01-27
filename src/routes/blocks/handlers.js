@@ -159,8 +159,6 @@ export const createBlock = async (request, reply) => {
 		// const definitionContent = archiveResult.files['definition.json'].content;
 		// const templateDefinition = JSON.parse(definitionContent);
 
-		console.log('archiveResult.files', archiveResult.files);
-
 		const blockDefinition = {
 			originalArchive: fileData.filename,
 			mimeType: fileData.mimetype,
@@ -408,7 +406,6 @@ export const updateBlock = async (request, reply) => {
 export const getOneBlock = async (request, reply) => {
 	try {
 		const { blockId } = request.params;
-		console.log('blockId', blockId);
 
 		const [block] = await db
 			.select()

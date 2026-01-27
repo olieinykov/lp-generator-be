@@ -20,8 +20,6 @@ async function generateImageWithFal(prompt) {
 			},
 		});
 
-		console.log('Image result', result);
-
 		return result.images[0].url;
 	} catch (error) {
 		console.error('Fal.ai error:', error);

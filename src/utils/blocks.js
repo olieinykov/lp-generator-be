@@ -123,10 +123,29 @@ ${navInstruction}
 =====================
 CONTENT VARIABLES RULES
 =====================
-1. "text": {"variableName": {"value": "text"}}
-2. "image": {"variableName": {"href": "detailed image description for AI image generation", "alt": "alt text"}}
-3. "link": {"variableName": {"value": null, "href": "url", "label": "text"}}
-4. "array": {"variableName": {"type": "array", "values": [...]}}
+1. TEXT VARIABLES: {"variableName": {"value": "text content"}}
+2. IMAGE VARIABLES: {"variableName": {"href": "detailed image description for AI image generation", "alt": "alt text"}}
+3. LINK VARIABLES: {"variableName": {"value": null, "href": "url", "label": "text"}}
+4. ARRAY VARIABLES: 
+   For array variables, fill the "values" array with complete objects.
+   Each object in the array should contain all its nested fields.
+
+   Example for "cards" array with image, title, description:
+   "cards": {
+     "type": "array",
+     "values": [
+       {
+         "image": {"href": "description for image 1", "alt": "alt text 1"},
+         "title": {"value": "Card Title 1"},
+         "description": {"value": "Card description 1"}
+       },
+       {
+         "image": {"href": "description for image 2", "alt": "alt text 2"},
+         "title": {"value": "Card Title 2"},
+         "description": {"value": "Card description 2"}
+       }
+     ]
+   }
 
 VARIABLES TO FILL:
 ${variablesDescription}
@@ -136,23 +155,26 @@ OUTPUT FORMAT
 =====================
 Return a FLAT JSON object where each key is the variable name.
 
-Example for Ukrainian header block:
-{
-  "logoText": {"value": "Норвезька Архітектура"},
-  "logoImage": {"href": "minimalist logo with viking symbols and modern typography", "alt": "Логотип норвезької архітектури"},
-  "ctaButton": {"href": "/contact", "label": "Зв'язатися з нами"}
-}
-
-=====================
-OUTPUT FORMAT
-=====================
-Return a FLAT JSON object where each key is the variable name.
-
 CORRECT FORMAT:
 {
-  "logoText": {"value": "Company Name"},
-  "logoImage": {"href": "dark logo with space theme", "alt": "Logo"},
-  "logoLink": {"value": null, "href": "/", "label": "Home"}${
+  "tagline": {"value": "Our Services"},
+  "title": {"value": "What We Offer"},
+  "description": {"value": "Comprehensive solutions for your needs"},
+  "cards": {
+    "type": "array",
+    "values": [
+      {
+        "image": {"href": "modern office design with plants", "alt": "Office design"},
+        "title": {"value": "Office Design"},
+        "description": {"value": "Ergonomic workspace solutions"}
+      },
+      {
+        "image": {"href": "team collaboration meeting", "alt": "Team meeting"},
+        "title": {"value": "Team Collaboration"},
+        "description": {"value": "Spaces for effective teamwork"}
+      }
+    ]
+  }${
 		templatePages
 			? `,
   "navigationLabels": ["Label 1", "Label 2"]`
@@ -160,12 +182,8 @@ CORRECT FORMAT:
   }
 }
 
-WRONG FORMAT (do NOT group by type):
-{
-  "text": {"logoText": {"value": "..."}},
-  "image": {"logoImage": {"href": "..."}},
-  "link": {"logoLink": {"href": "..."}}
-}
+IMPORTANT: For array items, include ALL required fields from the definition.
+Do NOT use "type" field inside array items unless specified in definition.
 
 Return ONLY valid JSON. All text in ${language}.
 `;
@@ -313,30 +331,45 @@ All text in ${language}. Return ONLY valid JSON.
 	];
 };
 
-// ==================== HTML BUILDER ====================
-
 const scopeCss = (scss, blockId) => {
 	try {
-		const replacedScss = scss.replace(/#blockId/g, `#${blockId}`);
+		const replacedScss = scss.replace(/#_blockId/g, `#${blockId}`);
 		const result = sass.compileString(replacedScss);
-		return result.css;
+		return `
+			/*!CSS-BLOCK:${blockId}:START!*/
+				${result.css}
+			/*!CSS-BLOCK:${blockId}:END!*/
+		`;
 	} catch (error) {
 		console.error(`${blockId}:`, error);
-		return '';
+		return scss;
+	}
+};
+
+const scopeHtml = (block, blockId) => {
+	try {
+		const fallbackHTML = `<div id="${blockId}" class="generation-block-error">Failed to render ${block.blockType}</div>`;
+
+		const result = block.hasError
+			? fallbackHTML
+			: nunjucks.renderString(block.html, {
+					...block.variables,
+					_blockId: blockId,
+				});
+		return `<!-- !HTML-BLOCK:${blockId}:START! -->${result}<!-- !HTML-BLOCK:${blockId}:END! -->`;
+	} catch (error) {
+		console.error(`${blockId}:`, error);
+		return block;
 	}
 };
 
 export const buildPageHtml = (page, globalCss, language, country) => {
 	const filledBlocks = page.blocks.map((block, blockIndex) => {
-		const id = `${block.category}-${block.id}-${block.pageIndex}-${blockIndex}`;
-		const scopedCss = scopeCss(block.css, id);
+		const id = `${block.blockType}-${blockIndex}`;
 		return {
 			...block,
-			scopedCss,
-			html: nunjucks.renderString(block.html, {
-				...block.variables,
-				_blockId: id,
-			}),
+			scopedCss: scopeCss(block.css, id),
+			html: scopeHtml(block, id),
 		};
 	});
 	const blocksHtml = filledBlocks.map((b) => b.html).join('\n');
@@ -355,20 +388,20 @@ export const buildPageHtml = (page, globalCss, language, country) => {
     <meta name="geo.placename" content="${country.toUpperCase()}">
     <meta name="content-language" content="${language}">
     
-    <title>${page.seo.title}</title>
-    <meta name="description" content="${page.seo.description || ''}">
-    <meta name="keywords" content="${page.seo.keywords || ''}">
+    <title>${page.title}</title>
+    <meta name="description" content="${page?.seo?.description || ''}">
+    <meta name="keywords" content="${page?.seo?.keywords || ''}">
     
     <!-- Open Graph -->
-    <meta property="og:title" content="${page.seo.title}">
-    <meta property="og:description" content="${page.seo.description || ''}">
+    <meta property="og:title" content="${page?.seo?.title}">
+    <meta property="og:description" content="${page?.seo?.description || ''}">
     <meta property="og:type" content="website">
     <meta property="og:locale" content="${language}_${country.toUpperCase()}">
     
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="${page.seo.title}">
-    <meta name="twitter:description" content="${page.seo.description || ''}">
+    <meta name="twitter:title" content="${page?.seo?.title}">
+    <meta name="twitter:description" content="${page.seo?.description || ''}">
     
     <style>
         :root {
@@ -398,10 +431,30 @@ export const buildPageHtml = (page, globalCss, language, country) => {
 };
 
 export const buildSitePages = (pages, globalCss, language, country) => {
-	return pages.map((page) => ({
-		filename: page.path === '/' ? 'index.html' : `${page.path.slice(1)}.html`,
-		html: buildPageHtml(page, globalCss, language, country),
-	}));
+	return pages.map((page) => {
+		const pageHasErrors = page?.blocks?.some((block) => block.hasError);
+		const blocks = page?.blocks?.map((block, blockIndex) => {
+			return {
+				blockId: block.id,
+				isGlobal: block.isGlobal,
+				blockType: block.blockType,
+				generationBlockId: `${block.blockType}-${blockIndex}`,
+				definition: block.definition,
+				variables: block.variables,
+				hasError: block?.hasError,
+				css: block.css,
+				html: block.html,
+			};
+		});
+
+		return {
+			...page,
+			blocks,
+			pageHasErrors,
+			filename: page.path === '/' ? 'index.html' : `${page.path.replace('/', '')}.html`,
+			html: buildPageHtml(page, globalCss, language, country),
+		};
+	});
 };
 
 export const generateTheme = async (prompt) => {
@@ -463,6 +516,18 @@ Return only JSON.`;
 };
 
 export const flatPageBlocks = (pages) => {
+	return pages.reduce((flatBlocks, page, pageIndex) => {
+		const pageBlocks = (page?.layout ?? []).map((blockDef, blockIndex) => ({
+			blockIndex: blockIndex,
+			pageIndex: pageIndex,
+			...blockDef,
+		}));
+
+		return [...flatBlocks, ...pageBlocks];
+	}, []);
+};
+
+export const flatPageBlocks1 = (pages) => {
 	return pages.reduce((flatBlocks, page, pageIndex) => {
 		const pageBlocks = (page?.layout ?? []).map((blockDef, blockIndex) => ({
 			blockIndex: blockIndex,
