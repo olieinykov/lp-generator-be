@@ -8,14 +8,19 @@ import { PRICE_FOR_PROMPTS } from '../../config/constants.js';
 import slugify from 'slugify';
 import {
 	buildSitePages,
-	flatPageBlocks,
+	fillPageVariables,
+	generatePageBlocksContent,
 	generatePageSeo,
 	generateTheme,
+	getBlockById,
 	getBlockByType,
 	getBlocks,
+	pageBlocksVars,
 	prepareBlock,
 	prepareGlobalBlocks,
+	updatePageContentRegex,
 } from '../../utils/blocks.js';
+import { extractHtmlFiles } from '../../utils/zipHandler.js';
 
 function cutNumber(number, amountAfterDot) {
 	const factor = 10 ** amountAfterDot;
@@ -85,97 +90,35 @@ export const createSite = async (request, reply) => {
 		});
 
 		const globalBlocksMap = new Map(preparedGlobalBlocks.map((b) => [b.category, b]));
-		const pagesBlocks = flatPageBlocks(template.definition.pages);
-		const generatedBlocks = await Promise.allSettled(
-			pagesBlocks.map(async (blockDef) => {
-				const isGlobal = globalBlocksMap.has(blockDef.type);
-				const baseInfo = {
-					pageIndex: blockDef.pageIndex,
-					blockType: blockDef.type,
-					isGlobal,
+
+		const pages = await Promise.all(
+			template.definition.pages.map(async (page, pageIndex) => {
+				const { pageStructureObj, processBlocks } = await pageBlocksVars(
+					page.layout,
+					globalBlocksMap,
+				);
+				const [aiContent, tokens] = await generatePageBlocksContent(
+					processBlocks,
+					prompt,
+					country,
+					language,
+				);
+				tokensInfo.totalPromptTokens += tokens.promptTokens;
+				tokensInfo.totalCompletionTokens += tokens.completionTokens;
+				tokensInfo.totalTokens += tokens.totalTokens;
+
+				const finalPageStructure = fillPageVariables(pageStructureObj, aiContent);
+				return {
+					...page,
+					finalPageStructure,
+					seo: seoData[pageIndex],
 				};
-
-				try {
-					// For debug error case
-					// if (blockDef.type === "info") {
-					// 	throw new Error("My custom error")
-					// }
-					if (isGlobal) {
-						const block = globalBlocksMap.get(blockDef.type);
-						return {
-							...baseInfo,
-							...block,
-						};
-					} else {
-						const block = await getBlockByType(blockDef.type);
-						const preparedBlock = await prepareBlock(block, prompt, country, language);
-
-						tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
-						tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
-						tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
-
-						return {
-							hasError: false,
-							...baseInfo,
-							...preparedBlock,
-						};
-					}
-				} catch (error) {
-					return {
-						...baseInfo,
-						error: error.message,
-						hasError: true,
-					};
-				}
 			}),
 		);
-		const pagesWithBlocks = generatedBlocks.map((blockResult) => blockResult.value);
-		const pages = template.definition.pages.reduce((acc, page, pageIndex) => {
-			const blocks = pagesWithBlocks.filter((block) => block.pageIndex === pageIndex);
-			return [
-				...acc,
-				{
-					...page,
-					blocks,
-					seo: seoData[pageIndex],
-				},
-			];
-		}, []);
 
-		// const pages = await Promise.all(
-		// 	template.definition.pages.map(async (pageConfig) => {
-		// 		const blocks = [];
-		//
-		// 		for (const blockDef of pageConfig.layout) {
-		// 			if (globalBlocksMap.has(blockDef.type)) {
-		// 				blocks.push(globalBlocksMap.get(blockDef.type));
-		// 			} else {
-		// 				const block = await getBlockByType(blockDef.type);
-		// 				const filledBlock = await fillBlock(block, prompt, country, language);
-		//
-		// 				tokensInfo.totalPromptTokens += filledBlock.tokens.promptTokens;
-		// 				tokensInfo.totalCompletionTokens += filledBlock.tokens.completionTokens;
-		// 				tokensInfo.totalTokens += filledBlock.tokens.totalTokens;
-		//
-		// 				blocks.push(filledBlock);
-		// 			}
-		// 		}
-		//
-		// 		const [seo, seoTokens] = await generatePageSeo(pageConfig.title, prompt, language, country);
-		//
-		// 		tokensInfo.totalPromptTokens += seoTokens.promptTokens;
-		// 		tokensInfo.totalCompletionTokens += seoTokens.completionTokens;
-		// 		tokensInfo.totalTokens += seoTokens.totalTokens;
-		//
-		// 		return {
-		// 			title: seo.title,
-		// 			description: seo.description,
-		// 			keywords: seo.keywords,
-		// 			path: pageConfig.path,
-		// 			blocks
-		// 		};
-		// 	})
-		// );
+		pages.forEach((page, index) => {
+			console.log(`Its page - ${index}`, JSON.stringify(page, 2, null));
+		});
 
 		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
 		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
@@ -443,10 +386,10 @@ export const regenerateSite = async (request, reply) => {
 			promptTokens: promptTokensDB,
 			completionTokens: completionTokensDB,
 		} = result;
-		// 		const template = await db.query.templates.findFirst({
-		// 			where: eq(templates.id, definition),
-		// 		});
-		//
+		const template = await db.query.templates.findFirst({
+			where: eq(templates.id, definition),
+		});
+
 		// 		if (!template || !template.definition?.blocks) {
 		// 			return reply.status(404).send({ error: 'Template not found' });
 		// 		}
@@ -604,6 +547,141 @@ export const regenerateSite = async (request, reply) => {
 		// 			},
 		// 			success: true,
 		// 		});
+	} catch (err) {
+		reply.status(500).send({
+			error: err.message,
+			success: false,
+		});
+	}
+};
+
+export const regenerateBlock = async (request, reply) => {
+	try {
+		const { siteId, blockId } = request.params;
+		const { regeneratingPagesPath, blockIndex } = request.body;
+
+		const [result] = await db.select().from(sites).where(eq(sites.id, siteId));
+		const {
+			name,
+			prompt,
+			definition,
+			country,
+			language,
+			archiveUrl,
+			totalTokens: totalTokensDB,
+			promptTokens: promptTokensDB,
+			completionTokens: completionTokensDB,
+		} = result;
+		const template = await db.query.templates.findFirst({
+			where: eq(templates.id, definition),
+		});
+
+		if (!template) {
+			return reply.status(404).send({ error: 'Template not found' });
+		}
+
+		const tokensInfo = {
+			totalPromptTokens: promptTokensDB,
+			totalCompletionTokens: completionTokensDB,
+			totalTokens: totalTokensDB,
+		};
+		let isGlobalBlock = false;
+		const htmlPagesPath = await extractHtmlFiles(archiveUrl);
+		const currentBlock = await getBlockById(blockId);
+		const newBlock = await getBlockByType(currentBlock.category);
+		let generatedBlock;
+
+		if (
+			template.definition.globals.blocks.some(
+				(tmpBlock) => tmpBlock.type === newBlock.category,
+			)
+		) {
+			const [preparedGlobalBlocks] = await prepareGlobalBlocks(
+				[newBlock],
+				template?.definition?.pages,
+				prompt,
+				country,
+				language,
+			);
+			isGlobalBlock = true;
+
+			tokensInfo.totalPromptTokens += preparedGlobalBlocks.tokens.promptTokens;
+			tokensInfo.totalCompletionTokens += preparedGlobalBlocks.tokens.completionTokens;
+			tokensInfo.totalTokens += preparedGlobalBlocks.tokens.totalTokens;
+
+			generatedBlock = preparedGlobalBlocks;
+		} else {
+			const preparedBlock = await prepareBlock(newBlock, prompt, country, language);
+
+			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
+			tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
+			tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
+
+			generatedBlock = preparedBlock;
+		}
+
+		htmlPagesPath.forEach((p) => {
+			if (isGlobalBlock || regeneratingPagesPath.includes(p.path)) {
+				p.block = generatedBlock;
+			}
+		});
+		const newHTML = updatePageContentRegex(
+			htmlPagesPath,
+			currentBlock.id,
+			template.definition.pages,
+			blockIndex,
+		);
+
+		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
+		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+		const totalPrice = inputPrice + outputPrice;
+
+		const zip = new AdmZip();
+		newHTML.forEach((page) => {
+			zip.addFile(`${page.nameWithoutExtension}.html`, Buffer.from(page.html, 'utf8'));
+		});
+		const zipBuffer = zip.toBuffer();
+
+		const safeName = slugify(`site-${name}-${new Date().getTime()}.zip`, {
+			lower: true,
+			strict: true,
+		});
+
+		const { error: uploadError } = await supabase.storage
+			.from('sites')
+			.upload(safeName, zipBuffer, {
+				contentType: 'application/zip',
+				upsert: false,
+			});
+
+		if (uploadError) {
+			throw uploadError;
+		}
+
+		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(safeName);
+
+		const [siteData] = await db
+			.update(sites)
+			.set({
+				archiveUrl: urlData.publicUrl,
+				updatedAt: new Date(),
+				promptTokens: tokensInfo.totalPromptTokens,
+				completionTokens: tokensInfo.totalCompletionTokens,
+				totalTokens: tokensInfo.totalTokens,
+				inputUsdPrice: inputPrice,
+				outputUsdPrice: outputPrice,
+				totalUsdPrice: totalPrice,
+			})
+			.where(eq(sites.id, siteId))
+			.returning();
+
+		return reply.send({
+			data: {
+				...siteData,
+				previews: newHTML.map((page) => page.html),
+			},
+			success: true,
+		});
 	} catch (err) {
 		reply.status(500).send({
 			error: err.message,

@@ -55,6 +55,39 @@ const processImages = async (content, variables) => {
 	return content;
 };
 
+export const processImagesPageStructure = async (content, structure) => {
+	const processSingleBlock = async (blockData, blockDef) => {
+		if (!blockData || !blockDef) return;
+		if (blockData.variables && blockDef.variables) {
+			for (const [varKey, varValue] of Object.entries(blockData.variables)) {
+				const varType = blockDef.variables[varKey]?.type;
+				if (varType === 'image' && varValue?.href && !varValue.href.startsWith('http')) {
+					varValue.href = await generateImageWithFal(varValue.href);
+				}
+				if (varType === 'array' && Array.isArray(varValue?.values)) {
+					for (const item of varValue.values) {
+						for (const [itemKey, itemValue] of Object.entries(item)) {
+							if (itemValue?.href && !itemValue.href.startsWith('http')) {
+								item[itemKey].href = await generateImageWithFal(itemValue.href);
+							}
+						}
+					}
+				}
+			}
+		}
+		if (blockData.childrenBlock && blockDef.childrenBlock) {
+			await processSingleBlock(blockData.childrenBlock, blockDef.childrenBlock);
+		}
+	};
+	for (const key of Object.keys(content)) {
+		if (key.startsWith('block')) {
+			await processSingleBlock(content[key], structure[key]);
+		}
+	}
+
+	return content;
+};
+
 // ==================== БАЗОВЫЕ ОПЕРАЦИИ ====================
 
 export const getBlockByType = async (type) => {
@@ -67,6 +100,22 @@ export const getBlockByType = async (type) => {
 
 	if (!block) {
 		throw new Error(`No active block found for type: ${type}`);
+	}
+
+	const unzippedBlock = await downloadAndUnzipBlock(block.archiveUrl);
+
+	return {
+		category: block.category,
+		id: block.id,
+		...unzippedBlock,
+	};
+};
+
+export const getBlockById = async (id) => {
+	const [block] = await db.select().from(blocks).where(eq(blocks.id, id)).limit(1);
+
+	if (!block) {
+		throw new Error(`No active block found with id: ${id}`);
 	}
 
 	const unzippedBlock = await downloadAndUnzipBlock(block.archiveUrl);
@@ -127,9 +176,19 @@ CONTENT VARIABLES RULES
 2. "image": {"variableName": {"href": "detailed image description for AI image generation", "alt": "alt text"}}
 3. "link": {"variableName": {"value": null, "href": "url", "label": "text"}}
 4. "array": {"variableName": {"type": "array", "values": [...]}}
+5. Tel: {"variableName": {"value": "Phone number in international format for ${country}"}}
+6. Address: {"variableName": {"value": "Full realistic address in ${country}"}}
+7. Email: {"variableName": {"value": "valid-email@example.com"}}
 
 VARIABLES TO FILL:
 ${variablesDescription}
+
+=====================
+LOCALIZATION RULES:
+=====================
+1. Tel: Use strict international format for ${country}. For example, if country is 'ua', use +380...
+2. Address: Generate a realistic, existing street/city format for ${country} in ${language}.
+3. Email: Must be syntactically correct (e.g., info@company.ua or support@brand.com).
 
 =====================
 OUTPUT FORMAT
@@ -187,6 +246,122 @@ Return ONLY valid JSON. All text in ${language}.
 
 	let result = JSON.parse(jsonMatch[0]);
 	result = await processImages(result, variables);
+
+	return [
+		result,
+		{
+			promptTokens: completion.usage.prompt_tokens,
+			completionTokens: completion.usage.completion_tokens,
+			totalTokens: completion.usage.total_tokens,
+		},
+	];
+};
+
+export const generatePageBlocksContent = async (pageStructure, prompt, country, language) => {
+	const systemPrompt = `
+You are a professional CONTENT generator for a website.
+STRICT LOCALIZATION: Language: ${language}, Country: ${country}.
+
+TASK:
+You will receive a hierarchical JSON structure representing website blocks. 
+Your goal is to return the EXACT same structure, but with all "variables" objects filled with natural, localized content.
+
+=====================
+RULES FOR CONTENT:
+=====================
+1. Contextual Harmony: Blocks must follow a single theme based on the user's prompt. 
+2. Nested Blocks: If a block contains a "childrenBlock", the content of the child must logically follow or supplement the parent's content.
+3. Natural Text: Generate human-readable, professional, and engaging text. No placeholders.
+4. Images: Provide detailed English prompts for AI image generation in the "href" field.
+
+=====================
+CONTENT VARIABLE FORMATS:
+=====================
+1. "text": {"variableName": {"value": "text"}}
+2. "image": {"variableName": {"href": "detailed image description for AI image generation", "alt": "alt text"}}
+3. "link": {"variableName": {"value": null, "href": "url", "label": "text"}}
+4. "array": {"variableName": {"type": "array", "values": [...]}}
+5. Tel: {"variableName": {"value": "Phone number in international format for ${country}"}}
+6. Address: {"variableName": {"value": "Full realistic address in ${country}"}}
+7. Email: {"variableName": {"value": "valid-email@example.com"}}
+
+=====================
+LOCALIZATION RULES:
+=====================
+1. Tel: Use strict international format for ${country}. For example, if country is 'ua', use +380...
+2. Address: Generate a realistic, existing street/city format for ${country} in ${language}.
+3. Email: Must be syntactically correct (e.g., info@company.ua or support@brand.com).
+
+=====================
+CONTENT VARIABLE RULES
+=====================
+- EACH block has a "variables" property. 
+- You MUST fill the key-value pairs DIRECTLY inside that "variables" object.
+- DO NOT create a second "variables" key inside.
+
+CORRECT (Directly inside):
+"block1": {
+  "category": "info",
+  "variables": {
+    "tagline": { "value": "..." },
+    "title": { "value": "..." }
+  }
+}
+
+WRONG (Double nesting):
+"block1": {
+  "variables": {
+    "variables": { ... }
+  }
+}
+
+=====================
+INPUT STRUCTURE TO FILL:
+=====================
+${JSON.stringify(pageStructure, null, 2)}
+
+=====================
+OUTPUT FORMAT:
+=====================
+Return ONLY a valid JSON object. 
+The output MUST have the same keys (e.g., "block0", "block1") and the same nested "childrenBlock" hierarchy as the input.
+Fill the "variables" field of EACH block.
+
+Example Output Structure:
+{
+  "block0": {
+    "category": "header",
+    "variables": { "logoText": {"value": "Brand Name"}, ... }
+  },
+  "block2": {
+    "category": "info",
+    "variables": { ... },
+    "childrenBlock": {
+        "category": "hero",
+        "variables": { ... }
+    }
+  }
+}
+
+Return ONLY valid JSON. All text in ${language} (except image generation prompts).
+`;
+	const completion = await openai.chat.completions.create({
+		model: 'gpt-5-mini',
+		messages: [
+			{ role: 'system', content: systemPrompt },
+			{ role: 'user', content: prompt || 'Create professional website content' },
+		],
+		temperature: 1,
+	});
+
+	const content = completion.choices[0].message.content;
+	const jsonMatch = content.match(/\{[\s\S]*\}/);
+	if (!jsonMatch) {
+		throw new Error('AI did not return valid JSON');
+	}
+
+	let result = JSON.parse(jsonMatch[0]);
+	result = await processImagesPageStructure(result, pageStructure);
 
 	return [
 		result,
@@ -317,7 +492,7 @@ All text in ${language}. Return ONLY valid JSON.
 
 const scopeCss = (scss, blockId) => {
 	try {
-		const replacedScss = scss.replace(/#blockId/g, `#${blockId}`);
+		const replacedScss = scss.replace(/#_blockId/g, `#${blockId}`);
 		const result = sass.compileString(replacedScss);
 		return result.css;
 	} catch (error) {
@@ -326,21 +501,112 @@ const scopeCss = (scss, blockId) => {
 	}
 };
 
-export const buildPageHtml = (page, globalCss, language, country) => {
-	const filledBlocks = page.blocks.map((block, blockIndex) => {
-		const id = `${block.category}-${block.id}-${block.pageIndex}-${blockIndex}`;
-		const scopedCss = scopeCss(block.css, id);
-		return {
-			...block,
-			scopedCss,
-			html: nunjucks.renderString(block.html, {
+const replaceHtmlById = (fullHtml, id, newBlockHtml) => {
+	const regex = new RegExp(`(<(\\w+)[^>]*id="${id}"[^>]*)([\\s\\S]*?)(<\\/\\2>)`, 'g');
+
+	return fullHtml.replace(regex, newBlockHtml);
+};
+
+const replaceCssInHtml = (fullHtml, id, newScopedCss) => {
+	const startComment = `/* <<<---- SCOPED STYLES FOR BLOCK ${id} START ---->>> */`;
+	const endComment = `/* <<<---- SCOPED STYLES FOR BLOCK ${id} END ---->>> */`;
+
+	const escapedStart = startComment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const escapedEnd = endComment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+	const regex = new RegExp(`${escapedStart}[\\s\\S]*?${escapedEnd}`, 'g');
+
+	if (fullHtml.includes(startComment)) {
+		return fullHtml.replace(regex, newScopedCss);
+	} else {
+		return fullHtml.replace('</style>', `\n${newScopedCss}\n</style>`);
+	}
+};
+
+const getBlockIndices = (templatePages, pagePath) => {
+	const pageIndex = templatePages.findIndex((p) => p.path === pagePath);
+	return pageIndex;
+};
+
+export const updatePageContentRegex = (pagesData, previousBlockId, templatePages, blockIndex) => {
+	return pagesData.map((pageData) => {
+		let { content: html, block, path, nameWithoutExtension } = pageData;
+		if (!block) {
+			return { nameWithoutExtension, path, html };
+		} else {
+			const pageIndex = getBlockIndices(templatePages, path, block.category, block.id);
+			const prevId = `${block.category}-${previousBlockId}-${pageIndex}-${blockIndex}`;
+			const currentId = `${block.category}-${block.id}-${pageIndex}-${blockIndex}`;
+
+			const newScopedCss = scopeCss(block.css, currentId);
+			const newBlockHtml = nunjucks.renderString(block.html, {
+				...block.variables,
+				_blockId: currentId,
+			});
+
+			html = replaceCssInHtml(html, prevId, newScopedCss);
+			html = replaceHtmlById(html, prevId, newBlockHtml);
+
+			return { nameWithoutExtension, path, html };
+		}
+	});
+};
+
+const processBlockRecursive = (block, blockIndex, pageIndex) => {
+	if (!block || block.hasError) return { html: '', css: '' };
+
+	const id = `${block.category}-${block.id}-${pageIndex}-${blockIndex}`;
+
+	let currentHtml = '';
+	try {
+		currentHtml = nunjucks
+			.renderString(block.html, {
 				...block.variables,
 				_blockId: id,
-			}),
-		};
+			})
+			.trim();
+	} catch (e) {
+		console.error(`Error rendering block ${id}:`, e);
+		return { html: '', css: '' };
+	}
+
+	let blockCssStart = `/* <<<---- SCOPED STYLES FOR BLOCK ${id} START ---->>> */\n`;
+	let blockCssEnd = `\n/* <<<---- SCOPED STYLES FOR BLOCK ${id} END ---->>> */`;
+	let totalCss = scopeCss(block.css, id);
+
+	if (block.childrenBlock) {
+		const childResult = processBlockRecursive(block.childrenBlock, blockIndex, pageIndex);
+		const match = currentHtml.match(/<\/[^>]+>$/);
+		if (match) {
+			const insertIndex = match.index;
+			currentHtml =
+				currentHtml.slice(0, insertIndex) +
+				`\n  ${childResult.html}\n` +
+				currentHtml.slice(insertIndex);
+		} else {
+			currentHtml += childResult.html;
+		}
+
+		totalCss += `\n${childResult.css}`;
+	}
+
+	return {
+		html: currentHtml,
+		css: `${blockCssStart}${totalCss}${blockCssEnd}`,
+	};
+};
+
+export const buildPageHtml = (page, globalCss, language, country, pageIndex) => {
+	const structure = page.finalPageStructure || {};
+	const blockKeys = Object.keys(structure).sort((a, b) => {
+		return parseInt(a.replace('block', '')) - parseInt(b.replace('block', ''));
 	});
-	const blocksHtml = filledBlocks.map((b) => b.html).join('\n');
-	const blocksCss = filledBlocks.map((b) => b.scopedCss).join('\n');
+	const renderedBlocks = blockKeys.map((key) =>
+		processBlockRecursive(structure[key], parseInt(key.replace('block', '')), pageIndex),
+	);
+
+	const blocksHtml = renderedBlocks.map((b) => b.html).join('\n');
+	const blocksCss = renderedBlocks.map((b) => b.css).join('\n');
 	const cssVariables = Object.entries(globalCss || {})
 		.map(([key, value]) => `${key}: ${value};`)
 		.join('\n    ');
@@ -354,40 +620,40 @@ export const buildPageHtml = (page, globalCss, language, country) => {
     <meta name="geo.region" content="${country.toUpperCase()}">
     <meta name="geo.placename" content="${country.toUpperCase()}">
     <meta name="content-language" content="${language}">
-    
+
     <title>${page.seo.title}</title>
     <meta name="description" content="${page.seo.description || ''}">
     <meta name="keywords" content="${page.seo.keywords || ''}">
-    
+
     <!-- Open Graph -->
     <meta property="og:title" content="${page.seo.title}">
     <meta property="og:description" content="${page.seo.description || ''}">
     <meta property="og:type" content="website">
     <meta property="og:locale" content="${language}_${country.toUpperCase()}">
-    
+
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="${page.seo.title}">
     <meta name="twitter:description" content="${page.seo.description || ''}">
-    
+
     <style>
         :root {
             ${cssVariables}
         }
-        
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-       
+
         body {
             font-family: var(--font-body, sans-serif);
             color: var(--color-text, #333);
             background-color: var(--color-background, #fff);
             line-height: var(--line-height-normal, 1.6);
         }
-        
+
         ${blocksCss}
     </style>
 </head>
@@ -398,9 +664,9 @@ export const buildPageHtml = (page, globalCss, language, country) => {
 };
 
 export const buildSitePages = (pages, globalCss, language, country) => {
-	return pages.map((page) => ({
+	return pages.map((page, idx) => ({
 		filename: page.path === '/' ? 'index.html' : `${page.path.slice(1)}.html`,
-		html: buildPageHtml(page, globalCss, language, country),
+		html: buildPageHtml(page, globalCss, language, country, idx),
 	}));
 };
 
@@ -472,4 +738,78 @@ export const flatPageBlocks = (pages) => {
 
 		return [...flatBlocks, ...pageBlocks];
 	}, []);
+};
+
+export const pageBlocksVars = async (blocks, globalBlocks) => {
+	const pageStructureObj = {};
+	const processBlocks = {};
+	let counter = 0;
+
+	const processRecursive = async (blockList, targetObjFull, targetObjProcess, isChildren) => {
+		for (const blockDef of blockList) {
+			if (globalBlocks.has(blockDef.type)) {
+				const currGlobalBlock = globalBlocks.get(blockDef.type);
+				targetObjFull[`block${counter++}`] = {
+					id: currGlobalBlock.id,
+					category: blockDef.type,
+					variables: currGlobalBlock.variables,
+					html: currGlobalBlock.html,
+					css: currGlobalBlock.css,
+				};
+				continue;
+			}
+			const dbBlock = await getBlockByType(blockDef.type);
+
+			const currentKey = isChildren ? 'childrenBlock' : `block${counter++}`;
+			targetObjFull[currentKey] = {
+				id: dbBlock.id,
+				category: blockDef.type,
+				variables: {},
+				html: dbBlock.html,
+				css: dbBlock.css,
+			};
+			targetObjProcess[currentKey] = {
+				id: dbBlock.id,
+				category: blockDef.type,
+				variables: dbBlock.definition.variables,
+			};
+
+			if (blockDef.childrenBlock) {
+				await processRecursive(
+					[blockDef.childrenBlock],
+					targetObjFull[currentKey],
+					targetObjProcess[currentKey],
+					true,
+				);
+			}
+		}
+	};
+
+	await processRecursive(blocks, pageStructureObj, processBlocks, false);
+	return {
+		pageStructureObj,
+		processBlocks,
+	};
+};
+
+export const fillPageVariables = (target, source) => {
+	for (const key in source) {
+		if (!target[key]) continue;
+
+		const sourceBlock = source[key];
+		const targetBlock = target[key];
+
+		if (sourceBlock.variables && Object.keys(sourceBlock.variables).length > 0) {
+			targetBlock.variables = sourceBlock.variables;
+			targetBlock.isFilled = true;
+		}
+
+		if (sourceBlock.childrenBlock) {
+			if (!targetBlock.childrenBlock) {
+				targetBlock.childrenBlock = {};
+			}
+			fillPageVariables(targetBlock, { childrenBlock: sourceBlock.childrenBlock });
+		}
+	}
+	return target;
 };

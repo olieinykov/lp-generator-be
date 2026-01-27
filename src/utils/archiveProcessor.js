@@ -67,7 +67,7 @@ async function validateFileContent(filename, buffer) {
 			if (trimmedContent.length === 0) {
 				throw new Error(`File ${filename} cannot be empty`);
 			}
-			const startsWithId = trimmedContent.startsWith('#blockId');
+			const startsWithId = trimmedContent.startsWith('#_blockId');
 			const endsWithBrace = trimmedContent.endsWith('}');
 
 			if (!startsWithId || !endsWithBrace) {
