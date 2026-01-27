@@ -176,9 +176,19 @@ CONTENT VARIABLES RULES
 2. "image": {"variableName": {"href": "detailed image description for AI image generation", "alt": "alt text"}}
 3. "link": {"variableName": {"value": null, "href": "url", "label": "text"}}
 4. "array": {"variableName": {"type": "array", "values": [...]}}
+5. Tel: {"variableName": {"value": "Phone number in international format for ${country}"}}
+6. Address: {"variableName": {"value": "Full realistic address in ${country}"}}
+7. Email: {"variableName": {"value": "valid-email@example.com"}}
 
 VARIABLES TO FILL:
 ${variablesDescription}
+
+=====================
+LOCALIZATION RULES:
+=====================
+1. Tel: Use strict international format for ${country}. For example, if country is 'ua', use +380...
+2. Address: Generate a realistic, existing street/city format for ${country} in ${language}.
+3. Email: Must be syntactically correct (e.g., info@company.ua or support@brand.com).
 
 =====================
 OUTPUT FORMAT
@@ -267,10 +277,20 @@ RULES FOR CONTENT:
 =====================
 CONTENT VARIABLE FORMATS:
 =====================
-- Text: {"variableName": {"value": "Generated Text"}}
-- Image: {"variableName": {"href": "detailed English prompt for image generation", "alt": "localized alt text"}}
-- Link: {"variableName": {"value": null, "href": "/path", "label": "localized button text"}}
-- Array: {"variableName": {"type": "array", "values": [...]}}
+1. "text": {"variableName": {"value": "text"}}
+2. "image": {"variableName": {"href": "detailed image description for AI image generation", "alt": "alt text"}}
+3. "link": {"variableName": {"value": null, "href": "url", "label": "text"}}
+4. "array": {"variableName": {"type": "array", "values": [...]}}
+5. Tel: {"variableName": {"value": "Phone number in international format for ${country}"}}
+6. Address: {"variableName": {"value": "Full realistic address in ${country}"}}
+7. Email: {"variableName": {"value": "valid-email@example.com"}}
+
+=====================
+LOCALIZATION RULES:
+=====================
+1. Tel: Use strict international format for ${country}. For example, if country is 'ua', use +380...
+2. Address: Generate a realistic, existing street/city format for ${country} in ${language}.
+3. Email: Must be syntactically correct (e.g., info@company.ua or support@brand.com).
 
 =====================
 CONTENT VARIABLE RULES
