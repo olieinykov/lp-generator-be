@@ -8,11 +8,14 @@ import { PRICE_FOR_PROMPTS } from '../../config/constants.js';
 import slugify from 'slugify';
 import {
 	buildSitePages,
+	fillPageVariables,
+	generatePageBlocksContent,
 	generatePageSeo,
 	generateTheme,
 	getBlockById,
 	getBlockByType,
 	getBlocks,
+	pageBlocksVars,
 	prepareBlock,
 	prepareGlobalBlocks,
 	updatePageContentRegex,
@@ -88,72 +91,35 @@ export const createSite = async (request, reply) => {
 
 		const globalBlocksMap = new Map(preparedGlobalBlocks.map((b) => [b.category, b]));
 
-		const processBlock = async (blockDef, context) => {
-			const { globalBlocksMap, prompt, country, language, tokensInfo } = context;
-
-			const isGlobal = globalBlocksMap.has(blockDef.type);
-			const baseInfo = {
-				blockType: blockDef.type,
-				isGlobal,
-			};
-
-			try {
-				let currentBlock;
-
-				if (isGlobal) {
-					currentBlock = { ...globalBlocksMap.get(blockDef.type), ...baseInfo };
-				} else {
-					const block = await getBlockByType(blockDef.type);
-					const preparedBlock = await prepareBlock(block, prompt, country, language);
-
-					tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
-					tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
-					tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
-
-					currentBlock = { ...preparedBlock, ...baseInfo, hasError: false };
-				}
-
-				if (blockDef.childrenBlock) {
-					currentBlock.childrenBlock = await processBlock(
-						blockDef.childrenBlock,
-						context,
-					);
-				}
-
-				return {
-					...baseInfo,
-					...currentBlock,
-				};
-			} catch (error) {
-				return {
-					...baseInfo,
-					hasError: true,
-					error: error.message,
-				};
-			}
-		};
-
 		const pages = await Promise.all(
 			template.definition.pages.map(async (page, pageIndex) => {
-				const context = {
+				const { pageStructureObj, processBlocks } = await pageBlocksVars(
+					page.layout,
 					globalBlocksMap,
+				);
+				const [aiContent, tokens] = await generatePageBlocksContent(
+					processBlocks,
 					prompt,
 					country,
 					language,
-					tokensInfo,
-				};
-
-				const blocks = await Promise.all(
-					page.layout.map((blockDef) => processBlock(blockDef, context)),
 				);
+				tokensInfo.totalPromptTokens += tokens.promptTokens;
+				tokensInfo.totalCompletionTokens += tokens.completionTokens;
+				tokensInfo.totalTokens += tokens.totalTokens;
 
+				const finalPageStructure = fillPageVariables(pageStructureObj, aiContent);
 				return {
 					...page,
-					blocks,
+					finalPageStructure,
 					seo: seoData[pageIndex],
 				};
 			}),
 		);
+
+		pages.forEach((page, index) => {
+			console.log(`Its page - ${index}`, JSON.stringify(page, 2, null));
+		});
+
 		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
 		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
 		const totalPrice = inputPrice + outputPrice;
