@@ -731,7 +731,10 @@ export const regenerateBlock = async (request, reply) => {
 				...page,
 				blocks: page.blocks.map((block, blockIndex) => {
 					if (block.generationBlockId !== generationBlockId) {
-						return block;
+						return {
+							...block,
+							id: block.blockId,
+						};
 					}
 
 					return {
