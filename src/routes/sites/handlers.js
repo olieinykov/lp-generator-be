@@ -4,7 +4,7 @@ import { and, asc, count, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
 import AdmZip from 'adm-zip';
 import { alias } from 'drizzle-orm/pg-core';
 import JSZip from 'jszip';
-import { PRICE_FOR_PROMPTS } from '../../config/constants.js';
+import { PRICE_FOR_PROMPTS_OPENAI } from '../../config/constants.js';
 import slugify from 'slugify';
 import {
 	buildSitePages,
@@ -45,6 +45,7 @@ export const createSite = async (request, reply) => {
 			totalPromptTokens: 0,
 			totalCompletionTokens: 0,
 			totalTokens: 0,
+			falTotalCost: 0,
 		};
 
 		const [themeResult, seoDataResults, globalBlocksData] = await Promise.all([
@@ -180,8 +181,10 @@ export const createSite = async (request, reply) => {
 		//	}),
 		//);
 
-		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
-		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+		const inputPrice =
+			tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
+		const outputPrice =
+			tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
 		const totalPrice = inputPrice + outputPrice;
 
 		const sitePages = buildSitePages(pages, globalCss, language, country);
@@ -237,6 +240,7 @@ export const createSite = async (request, reply) => {
 			data: {
 				...siteData,
 				previews: sitePages.map((page) => page.html),
+				falTotalCost: tokensInfo.falTotalCost,
 			},
 			success: true,
 		});
@@ -577,8 +581,8 @@ export const regenerateSite = async (request, reply) => {
 		// 			throw error;
 		// 		}
 		//
-		// 		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
-		// 		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+		// 		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
+		// 		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
 		//
 		// 		const totalPrice = inputPrice + outputPrice;
 		//
@@ -692,8 +696,10 @@ export const regenerateBlock = async (request, reply) => {
 			blockIndex,
 		);
 
-		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
-		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+		const inputPrice =
+			tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
+		const outputPrice =
+			tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
 		const totalPrice = inputPrice + outputPrice;
 
 		const zip = new AdmZip();

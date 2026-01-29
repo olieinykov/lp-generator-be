@@ -8,6 +8,7 @@ import * as sass from 'sass';
 import nunjucks from 'nunjucks';
 import fs from 'fs/promises';
 import path from 'path';
+import { PRICE_FOR_PROMPTS_FALAI } from '../config/constants.js';
 
 const openai = new OpenAI({
 	apiKey: process.env.OPEN_AI_KEY,
@@ -27,65 +28,92 @@ const generateImageWithFal = async (prompt) => {
 				num_images: 1,
 			},
 		});
-		return result.images[0].url;
+		const image = result.images[0];
+		const megapixels = (image.width * image.height) / 1000000;
+		const cost = megapixels * PRICE_FOR_PROMPTS_FALAI.perMegaPixel;
+
+		return { url: image.url, cost: cost };
 	} catch (error) {
 		console.error('Fal.ai error:', error);
-		return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=600`;
+		return {
+			url: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=600`,
+			cost: 0,
+		};
 	}
 };
 
 const processImages = async (content, variables) => {
+	let totalFalCost = 0;
+
 	for (const [key, value] of Object.entries(content)) {
 		const varDef = variables[key];
 
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
-			content[key].href = await generateImageWithFal(value.href);
+			const { url, cost } = await generateImageWithFal(value.href);
+			content[key].href = url;
+			totalFalCost += cost;
 		}
 
 		if (varDef?.type === 'array' && Array.isArray(value?.values)) {
 			for (const item of value.values) {
 				for (const [itemKey, itemValue] of Object.entries(item)) {
 					if (itemValue?.href && !itemValue.href.startsWith('http')) {
-						item[itemKey].href = await generateImageWithFal(itemValue.href);
+						const { url, cost } = await generateImageWithFal(itemValue.href);
+						item[itemKey].href = url;
+						totalFalCost += cost;
 					}
 				}
 			}
 		}
 	}
-	return content;
+	return { content, totalFalCost };
 };
 
 export const processImagesPageStructure = async (content, structure) => {
+	let totalFalCost = 0;
+
 	const processSingleBlock = async (blockData, blockDef) => {
 		if (!blockData || !blockDef) return;
+
 		if (blockData.variables && blockDef.variables) {
 			for (const [varKey, varValue] of Object.entries(blockData.variables)) {
 				const varType = blockDef.variables[varKey]?.type;
+
 				if (varType === 'image' && varValue?.href && !varValue.href.startsWith('http')) {
-					varValue.href = await generateImageWithFal(varValue.href);
+					const { url, cost } = await generateImageWithFal(varValue.href);
+					varValue.href = url;
+					totalFalCost += cost;
 				}
+
 				if (varType === 'array' && Array.isArray(varValue?.values)) {
 					for (const item of varValue.values) {
 						for (const [itemKey, itemValue] of Object.entries(item)) {
 							if (itemValue?.href && !itemValue.href.startsWith('http')) {
-								item[itemKey].href = await generateImageWithFal(itemValue.href);
+								const { url, cost } = await generateImageWithFal(itemValue.href);
+								item[itemKey].href = url;
+								totalFalCost += cost;
 							}
 						}
 					}
 				}
 			}
 		}
+
 		if (blockData.childrenBlock && blockDef.childrenBlock) {
 			await processSingleBlock(blockData.childrenBlock, blockDef.childrenBlock);
 		}
 	};
+
 	for (const key of Object.keys(content)) {
 		if (key.startsWith('block')) {
 			await processSingleBlock(content[key], structure[key]);
 		}
 	}
 
-	return content;
+	return {
+		content,
+		totalFalCost,
+	};
 };
 
 // ==================== БАЗОВЫЕ ОПЕРАЦИИ ====================
@@ -245,7 +273,8 @@ Return ONLY valid JSON. All text in ${language}.
 	}
 
 	let result = JSON.parse(jsonMatch[0]);
-	result = await processImages(result, variables);
+	const { content: falContent, totalFalCost } = await processImages(result, variables);
+	result = falContent;
 
 	return [
 		result,
@@ -253,6 +282,7 @@ Return ONLY valid JSON. All text in ${language}.
 			promptTokens: completion.usage.prompt_tokens,
 			completionTokens: completion.usage.completion_tokens,
 			totalTokens: completion.usage.total_tokens,
+			falTotalCost: totalFalCost,
 		},
 	];
 };
@@ -361,7 +391,11 @@ Return ONLY valid JSON. All text in ${language} (except image generation prompts
 	}
 
 	let result = JSON.parse(jsonMatch[0]);
-	result = await processImagesPageStructure(result, pageStructure);
+	const { content: falContent, totalFalCost } = await processImagesPageStructure(
+		result,
+		pageStructure,
+	);
+	result = falContent;
 
 	return [
 		result,
@@ -369,6 +403,7 @@ Return ONLY valid JSON. All text in ${language} (except image generation prompts
 			promptTokens: completion.usage.prompt_tokens,
 			completionTokens: completion.usage.completion_tokens,
 			totalTokens: completion.usage.total_tokens,
+			falTotalCost: totalFalCost,
 		},
 	];
 };
@@ -819,4 +854,5 @@ export const sumTokens = (target, source) => {
 	target.totalPromptTokens += source.promptTokens || 0;
 	target.totalCompletionTokens += source.completionTokens || 0;
 	target.totalTokens += source.totalTokens || 0;
+	target.falTotalCost += source.falTotalCost || 0;
 };
