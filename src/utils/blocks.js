@@ -813,3 +813,10 @@ export const fillPageVariables = (target, source) => {
 	}
 	return target;
 };
+
+export const sumTokens = (target, source) => {
+	if (!source) return;
+	target.totalPromptTokens += source.promptTokens || 0;
+	target.totalCompletionTokens += source.completionTokens || 0;
+	target.totalTokens += source.totalTokens || 0;
+};

@@ -16,7 +16,7 @@ import {
 } from './schema.js';
 
 const routes = async (fastify) => {
-	fastify.post('/', {
+	fastify.post('/parallelV1', {
 		handler: createSite,
 		schema: createSiteSchema,
 	});

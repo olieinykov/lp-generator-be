@@ -18,6 +18,7 @@ import {
 	pageBlocksVars,
 	prepareBlock,
 	prepareGlobalBlocks,
+	sumTokens,
 	updatePageContentRegex,
 } from '../../utils/blocks.js';
 import { extractHtmlFiles } from '../../utils/zipHandler.js';
@@ -45,80 +46,139 @@ export const createSite = async (request, reply) => {
 			totalCompletionTokens: 0,
 			totalTokens: 0,
 		};
-		const { theme: generatedTheme, tokens: themeTokens } = await generateTheme(prompt);
-		tokensInfo.totalPromptTokens += themeTokens.promptTokens;
-		tokensInfo.totalCompletionTokens += themeTokens.completionTokens;
-		tokensInfo.totalTokens += themeTokens.totalTokens;
 
-		const seoData = await Promise.all(
-			template.definition.pages.map(async (page) => {
-				try {
-					const [seo, tokens] = await generatePageSeo(
-						page.title,
-						prompt,
-						language,
-						country,
-					);
-					tokensInfo.totalPromptTokens += tokens.promptTokens;
-					tokensInfo.totalCompletionTokens += tokens.completionTokens;
-					tokensInfo.totalTokens += tokens.totalTokens;
-					return {
-						...seo,
-					};
-				} catch (err) {
-					return err;
-				}
-			}),
-		);
-		const globalCss = {
-			...generatedTheme,
-			// ...(template?.definition?.globals?.css || {})
-		};
+		const [themeResult, seoDataResults, globalBlocksData] = await Promise.all([
+			generateTheme(prompt),
+			Promise.all(
+				template.definition.pages.map((page) =>
+					generatePageSeo(page.title, prompt, language, country).catch((err) => ({
+						error: err,
+					})),
+				),
+			),
+			(async () => {
+				const blocks = await getBlocks(template?.definition?.globals?.blocks);
+				return prepareGlobalBlocks(
+					blocks,
+					template?.definition?.pages,
+					prompt,
+					country,
+					language,
+				);
+			})(),
+		]);
 
-		const globalBlocks = await getBlocks(template?.definition?.globals?.blocks);
-		const preparedGlobalBlocks = await prepareGlobalBlocks(
-			globalBlocks,
-			template?.definition?.pages,
-			prompt,
-			country,
-			language,
-		);
-		preparedGlobalBlocks.forEach((b) => {
-			tokensInfo.totalPromptTokens += b.tokens.promptTokens;
-			tokensInfo.totalCompletionTokens += b.tokens.completionTokens;
-			tokensInfo.totalTokens += b.tokens.totalTokens;
-		});
+		const { theme: generatedTheme, tokens: themeTokens } = themeResult;
+		const globalBlocksMap = new Map(globalBlocksData.map((b) => [b.category, b]));
 
-		const globalBlocksMap = new Map(preparedGlobalBlocks.map((b) => [b.category, b]));
-
-		const pages = await Promise.all(
+		const pagesResults = await Promise.all(
 			template.definition.pages.map(async (page, pageIndex) => {
+				const seoEntry = seoDataResults[pageIndex];
+				const pageSeo = Array.isArray(seoEntry) ? seoEntry[0] : {};
+
 				const { pageStructureObj, processBlocks } = await pageBlocksVars(
 					page.layout,
 					globalBlocksMap,
 				);
+
 				const [aiContent, tokens] = await generatePageBlocksContent(
 					processBlocks,
 					prompt,
 					country,
 					language,
 				);
-				tokensInfo.totalPromptTokens += tokens.promptTokens;
-				tokensInfo.totalCompletionTokens += tokens.completionTokens;
-				tokensInfo.totalTokens += tokens.totalTokens;
 
 				const finalPageStructure = fillPageVariables(pageStructureObj, aiContent);
+
 				return {
-					...page,
-					finalPageStructure,
-					seo: seoData[pageIndex],
+					pageData: {
+						...page,
+						finalPageStructure,
+						seo: pageSeo,
+					},
+					tokens,
 				};
 			}),
 		);
 
-		pages.forEach((page, index) => {
-			console.log(`Its page - ${index}`, JSON.stringify(page, 2, null));
+		sumTokens(tokensInfo, themeTokens);
+		seoDataResults.forEach((res) => Array.isArray(res) && sumTokens(tokensInfo, res[1]));
+		globalBlocksData.forEach((b) => sumTokens(tokensInfo, b.tokens));
+
+		const pages = pagesResults.map((res) => {
+			sumTokens(tokensInfo, res.tokens);
+			return res.pageData;
 		});
+		const globalCss = { ...generatedTheme };
+		//tokensInfo.totalPromptTokens += themeTokens.promptTokens;
+		//tokensInfo.totalCompletionTokens += themeTokens.completionTokens;
+		//tokensInfo.totalTokens += themeTokens.totalTokens;
+
+		//const seoData = await Promise.all(
+		//	template.definition.pages.map(async (page) => {
+		//		try {
+		//			const [seo, tokens] = await generatePageSeo(
+		//				page.title,
+		//				prompt,
+		//				language,
+		//				country,
+		//			);
+		//			tokensInfo.totalPromptTokens += tokens.promptTokens;
+		//			tokensInfo.totalCompletionTokens += tokens.completionTokens;
+		//			tokensInfo.totalTokens += tokens.totalTokens;
+		//			return {
+		//				...seo,
+		//			};
+		//		} catch (err) {
+		//			return err;
+		//		}
+		//	}),
+		//);
+		//const globalCss = {
+		//	...generatedTheme,
+		//	// ...(template?.definition?.globals?.css || {})
+		//};
+
+		//const globalBlocks = await getBlocks(template?.definition?.globals?.blocks);
+		//const preparedGlobalBlocks = await prepareGlobalBlocks(
+		//	globalBlocks,
+		//	template?.definition?.pages,
+		//	prompt,
+		//	country,
+		//	language,
+		//);
+		//preparedGlobalBlocks.forEach((b) => {
+		//	tokensInfo.totalPromptTokens += b.tokens.promptTokens;
+		//	tokensInfo.totalCompletionTokens += b.tokens.completionTokens;
+		//	tokensInfo.totalTokens += b.tokens.totalTokens;
+		//});
+
+		//const globalBlocksMap = new Map(preparedGlobalBlocks.map((b) => [b.category, b]));
+
+		//const pages = await Promise.all(
+		//	template.definition.pages.map(async (page, pageIndex) => {
+		//		const { pageStructureObj, processBlocks } = await pageBlocksVars(
+		//			page.layout,
+		//			globalBlocksMap,
+		//		);
+		//		const [aiContent, tokens] = await generatePageBlocksContent(
+		//			processBlocks,
+		//			prompt,
+		//			country,
+		//			language,
+		//		);
+		//		tokensInfo.totalPromptTokens += tokens.promptTokens;
+		//		tokensInfo.totalCompletionTokens += tokens.completionTokens;
+		//		tokensInfo.totalTokens += tokens.totalTokens;
+
+		//		const finalPageStructure = fillPageVariables(pageStructureObj, aiContent);
+		//		return {
+		//			...page,
+		//			finalPageStructure,
+		//			seo: seoData[pageIndex],
+		//		};
+		//	}),
+		//);
 
 		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
 		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
