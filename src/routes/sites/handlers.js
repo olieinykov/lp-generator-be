@@ -8,12 +8,17 @@ import { PRICE_FOR_PROMPTS_OPENAI } from '../../config/constants.js';
 import slugify from 'slugify';
 import {
 	buildSitePages,
+	fillPageVariables,
 	flatPageBlocks,
+	generatePageBlocksContent,
+	generatePageSeo,
 	generateTheme,
 	getBlockByType,
 	getBlocks,
+	pageBlocksVars,
 	prepareBlock,
 	prepareGlobalBlocks,
+	sumTokens,
 } from '../../utils/blocks.js';
 import { replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
 
@@ -41,114 +46,70 @@ export const createSite = async (request, reply) => {
 			totalTokens: 0,
 			totalFalCost: 0,
 		};
-		console.time('STEP THEME');
-		const { theme: generatedTheme, tokens: themeTokens } = await generateTheme(prompt);
-		tokensInfo.totalPromptTokens += themeTokens.promptTokens;
-		tokensInfo.totalCompletionTokens += themeTokens.completionTokens;
-		tokensInfo.totalTokens += themeTokens.totalTokens;
-		console.timeLog('STEP THEME');
 
-		// const seoData = await Promise.all(
-		// 	template.definition.pages.map(async (page) => {
-		// 		try {
-		// 			const [seo, tokens] = await generatePageSeo(
-		// 				page.title,
-		// 				prompt,
-		// 				language,
-		// 				country,
-		// 			);
-		// 			tokensInfo.totalPromptTokens += tokens.promptTokens;
-		// 			tokensInfo.totalCompletionTokens += tokens.completionTokens;
-		// 			tokensInfo.totalTokens += tokens.totalTokens;
-		// 			return seo;
-		// 		} catch (err) {
-		// 			return err;
-		// 		}
-		// 	}),
-		// );
-		const globalCss = {
-			...generatedTheme,
-			// ...(template?.definition?.globals?.css || {})
-		};
+		const [themeResult, seoDataResults, globalBlocksData] = await Promise.all([
+			generateTheme(prompt),
+			Promise.all(
+				template.definition.pages.map((page) =>
+					generatePageSeo(page.title, prompt, language, country).catch((err) => ({
+						error: err,
+					})),
+				),
+			),
+			(async () => {
+				const blocks = await getBlocks(template?.definition?.globals?.blocks);
+				return prepareGlobalBlocks(
+					blocks,
+					template?.definition?.pages,
+					prompt,
+					country,
+					language,
+				);
+			})(),
+		]);
 
-		console.time('STEP GLOBAL BLOCKS');
-		const globalBlocks = await getBlocks(template?.definition?.globals?.blocks);
-		const preparedGlobalBlocks = await prepareGlobalBlocks(
-			globalBlocks,
-			template?.definition?.pages,
-			prompt,
-			country,
-			language,
-		);
-		preparedGlobalBlocks.forEach((b) => {
-			tokensInfo.totalPromptTokens += b.tokens?.promptTokens ?? 0;
-			tokensInfo.totalCompletionTokens += b.tokens?.completionTokens ?? 0;
-			tokensInfo.totalTokens += b.tokens?.totalTokens ?? 0;
-			tokensInfo.totalFalCost += b.tokens?.totalFalCost ?? 0;
-		});
+		const { theme: generatedTheme, tokens: themeTokens } = themeResult;
+		const globalBlocksMap = new Map(globalBlocksData.map((b) => [b.category, b]));
 
-		const globalBlocksMap = new Map(preparedGlobalBlocks.map((b) => [b.category, b]));
-		console.timeEnd('STEP GLOBAL BLOCKS');
+		const pagesResults = await Promise.all(
+			template.definition.pages.map(async (page, pageIndex) => {
+				const seoEntry = seoDataResults[pageIndex];
+				const pageSeo = Array.isArray(seoEntry) ? seoEntry[0] : {};
 
-		console.time('STEP BLOCKS');
-		const pagesBlocks = flatPageBlocks(template.definition.pages);
-		const generatedBlocks = await Promise.allSettled(
-			pagesBlocks.map(async (blockDef) => {
-				const isGlobal = globalBlocksMap.has(blockDef.type);
-				const baseInfo = {
-					pageIndex: blockDef.pageIndex,
-					blockType: blockDef.type,
-					isGlobal,
-					hasError: false,
+				const { pageStructureObj, processBlocks } = await pageBlocksVars(
+					page.layout,
+					globalBlocksMap,
+				);
+
+				const [aiContent, tokens] = await generatePageBlocksContent(
+					processBlocks,
+					prompt,
+					country,
+					language,
+				);
+
+				const finalPageStructure = fillPageVariables(pageStructureObj, aiContent);
+
+				return {
+					pageData: {
+						...page,
+						finalPageStructure,
+						seo: pageSeo,
+					},
+					tokens,
 				};
-
-				try {
-					if (isGlobal) {
-						const block = globalBlocksMap.get(blockDef.type);
-						return {
-							...baseInfo,
-							...block,
-						};
-					} else {
-						const block = await getBlockByType(blockDef.type);
-						const preparedBlock = await prepareBlock(block, prompt, country, language);
-						console.log('preparedBlock', preparedBlock);
-
-						tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
-						tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
-						tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
-						tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
-
-						return {
-							hasError: false,
-							...baseInfo,
-							...preparedBlock,
-						};
-					}
-				} catch (error) {
-					return {
-						...baseInfo,
-						error: error.message,
-						hasError: true,
-					};
-				}
 			}),
 		);
-		const pagesWithBlocks = generatedBlocks.map((blockResult) => blockResult.value);
-		const pages = template.definition.pages.reduce((acc, page, pageIndex) => {
-			const blocks = pagesWithBlocks.filter((block) => block.pageIndex === pageIndex);
-			return [
-				...acc,
-				{
-					...page,
-					blocks,
-					// seo: seoData[pageIndex],
-				},
-			];
-		}, []);
 
-		console.timeEnd('STEP BLOCKS');
+		sumTokens(tokensInfo, themeTokens);
+		seoDataResults.forEach((res) => Array.isArray(res) && sumTokens(tokensInfo, res[1]));
+		globalBlocksData.forEach((b) => sumTokens(tokensInfo, b.tokens));
 
+		const pages = pagesResults.map((res) => {
+			sumTokens(tokensInfo, res.tokens);
+			return res.pageData;
+		});
+		const globalCss = { ...generatedTheme };
 		const inputPrice =
 			tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
 		const outputPrice =
