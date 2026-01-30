@@ -8,6 +8,7 @@ import * as sass from 'sass';
 import nunjucks from 'nunjucks';
 import fs from 'fs/promises';
 import path from 'path';
+import { PRICE_FOR_PROMPTS_FALAI } from '../config/constants.js';
 
 const openai = new OpenAI({
 	apiKey: process.env.OPEN_AI_KEY,
@@ -27,32 +28,43 @@ const generateImageWithFal = async (prompt) => {
 				num_images: 1,
 			},
 		});
-		return result.images[0].url;
+		const image = result.images[0];
+		const megapixels = (image.width * image.height) / 1000000;
+		const cost = megapixels * PRICE_FOR_PROMPTS_FALAI.perMegaPixel;
+
+		return { url: image.url, cost: cost };
 	} catch (error) {
-		console.error('Fal.ai error:', error);
-		return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=600`;
+		return {
+			url: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=600`,
+			cost: 0,
+		};
 	}
 };
 
 const processImages = async (content, variables) => {
+	let totalFalCost = 0;
 	for (const [key, value] of Object.entries(content)) {
 		const varDef = variables[key];
 
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
-			content[key].href = await generateImageWithFal(value.href);
+			const { url, cost } = await generateImageWithFal(value.href);
+			content[key].href = url;
+			totalFalCost += cost;
 		}
 
 		if (varDef?.type === 'array' && Array.isArray(value?.values)) {
 			for (const item of value.values) {
 				for (const [itemKey, itemValue] of Object.entries(item)) {
 					if (itemValue?.href && !itemValue.href.startsWith('http')) {
-						item[itemKey].href = await generateImageWithFal(itemValue.href);
+						const { url, cost } = await generateImageWithFal(itemValue.href);
+						item[itemKey].href = url;
+						totalFalCost += cost;
 					}
 				}
 			}
 		}
 	}
-	return content;
+	return { content, totalFalCost };
 };
 
 // ==================== БАЗОВЫЕ ОПЕРАЦИИ ====================
@@ -204,7 +216,8 @@ Return ONLY valid JSON. All text in ${language}.
 	}
 
 	let result = JSON.parse(jsonMatch[0]);
-	result = await processImages(result, variables);
+	const { totalFalCost, content: updatedContent } = await processImages(result, variables);
+	result = updatedContent;
 
 	return [
 		result,
@@ -212,27 +225,59 @@ Return ONLY valid JSON. All text in ${language}.
 			promptTokens: completion.usage.prompt_tokens,
 			completionTokens: completion.usage.completion_tokens,
 			totalTokens: completion.usage.total_tokens,
+			totalFalCost: totalFalCost,
 		},
 	];
 };
 
 export const prepareBlock = async (block, prompt, country, language, navigation = null) => {
-	const [aiContent, tokens] = await generateBlockContent(
-		block.definition.variables,
-		block.category,
-		prompt,
-		country,
-		language,
-	);
+	try {
+		if (block.hasError) {
+			throw new Error(block.error);
+		}
+		const [aiContent, tokens] = await generateBlockContent(
+			block.definition.variables,
+			block.category,
+			prompt,
+			country,
+			language,
+		);
 
-	const variables = navigation ? { ...aiContent, navigation } : aiContent;
+		console.log('aiContent', aiContent);
 
-	return { ...block, variables, tokens };
+		const variables = navigation ? { ...aiContent, navigation } : aiContent;
+
+		return { ...block, variables, tokens };
+	} catch (error) {
+		return {
+			...block,
+			hasError: true,
+			error: error?.message,
+		};
+	}
 };
 
 export const getBlocks = async (blocksList = []) => {
 	const results = await Promise.allSettled(
-		blocksList.map((blockDef) => getBlockByType(blockDef.type)),
+		blocksList.map(async (blockDef) => {
+			const baseBlock = {
+				type: blockDef.type,
+				category: blockDef.type,
+			};
+			try {
+				const block = await getBlockByType(blockDef.type);
+				return {
+					...block,
+					...baseBlock,
+				};
+			} catch (error) {
+				return {
+					...baseBlock,
+					hasError: true,
+					error: error?.message,
+				};
+			}
+		}),
 	);
 
 	return results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
@@ -249,35 +294,48 @@ export const prepareGlobalBlocks = async (
 
 	const results = await Promise.allSettled(
 		globalBlocks.map(async (block) => {
-			const needsNavLabels = !navigationLabels && block.definition.variables.navigation;
+			try {
+				if (block.hasError) {
+					throw new Error(block.error);
+				}
 
-			const [aiContent, tokens] = await generateBlockContent(
-				block.definition.variables,
-				block.category,
-				prompt,
-				country,
-				language,
-				needsNavLabels ? templatePages : null,
-			);
+				const needsNavLabels = !navigationLabels && block.definition.variables.navigation;
 
-			if (aiContent.navigationLabels) {
-				navigationLabels = aiContent.navigationLabels;
-				delete aiContent.navigationLabels;
+				const [aiContent, tokens] = await generateBlockContent(
+					block.definition.variables,
+					block.category,
+					prompt,
+					country,
+					language,
+					needsNavLabels ? templatePages : null,
+				);
+
+				if (aiContent.navigationLabels) {
+					navigationLabels = aiContent.navigationLabels;
+					delete aiContent.navigationLabels;
+				}
+
+				const navigation = {
+					type: 'nav',
+					value: templatePages.map((page, index) => ({
+						href: page.path === '/' ? './index.html' : `.${page.path}.html`,
+						label: navigationLabels?.[index] || page.title,
+						active: false,
+					})),
+				};
+
+				const variables = { ...aiContent, navigation };
+				console.log('aiContent', aiContent);
+				// const html = nunjucks.renderString(block.html, variables);
+
+				return { ...block, variables, tokens };
+			} catch (error) {
+				return {
+					...block,
+					hasError: true,
+					error: error?.message,
+				};
 			}
-
-			const navigation = {
-				type: 'nav',
-				value: templatePages.map((page, index) => ({
-					href: page.path === '/' ? './index.html' : `.${page.path}.html`,
-					label: navigationLabels?.[index] || page.title,
-					active: false,
-				})),
-			};
-
-			const variables = { ...aiContent, navigation };
-			// const html = nunjucks.renderString(block.html, variables);
-
-			return { ...block, variables, tokens };
 		}),
 	);
 

@@ -4,7 +4,7 @@ import { and, asc, count, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
 import AdmZip from 'adm-zip';
 import { alias } from 'drizzle-orm/pg-core';
 import JSZip from 'jszip';
-import { PRICE_FOR_PROMPTS } from '../../config/constants.js';
+import { PRICE_FOR_PROMPTS_OPENAI } from '../../config/constants.js';
 import slugify from 'slugify';
 import {
 	buildSitePages,
@@ -15,9 +15,6 @@ import {
 	prepareBlock,
 	prepareGlobalBlocks,
 } from '../../utils/blocks.js';
-import nunjucks from 'nunjucks';
-import * as sass from 'sass';
-import scss from 'nunjucks/browser/nunjucks-slim.js';
 import { replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
 
 function cutNumber(number, amountAfterDot) {
@@ -42,11 +39,14 @@ export const createSite = async (request, reply) => {
 			totalPromptTokens: 0,
 			totalCompletionTokens: 0,
 			totalTokens: 0,
+			totalFalCost: 0,
 		};
+		console.time('STEP THEME');
 		const { theme: generatedTheme, tokens: themeTokens } = await generateTheme(prompt);
 		tokensInfo.totalPromptTokens += themeTokens.promptTokens;
 		tokensInfo.totalCompletionTokens += themeTokens.completionTokens;
 		tokensInfo.totalTokens += themeTokens.totalTokens;
+		console.timeLog('STEP THEME');
 
 		// const seoData = await Promise.all(
 		// 	template.definition.pages.map(async (page) => {
@@ -71,6 +71,7 @@ export const createSite = async (request, reply) => {
 			// ...(template?.definition?.globals?.css || {})
 		};
 
+		console.time('STEP GLOBAL BLOCKS');
 		const globalBlocks = await getBlocks(template?.definition?.globals?.blocks);
 		const preparedGlobalBlocks = await prepareGlobalBlocks(
 			globalBlocks,
@@ -80,12 +81,16 @@ export const createSite = async (request, reply) => {
 			language,
 		);
 		preparedGlobalBlocks.forEach((b) => {
-			tokensInfo.totalPromptTokens += b.tokens.promptTokens;
-			tokensInfo.totalCompletionTokens += b.tokens.completionTokens;
-			tokensInfo.totalTokens += b.tokens.totalTokens;
+			tokensInfo.totalPromptTokens += b.tokens?.promptTokens ?? 0;
+			tokensInfo.totalCompletionTokens += b.tokens?.completionTokens ?? 0;
+			tokensInfo.totalTokens += b.tokens?.totalTokens ?? 0;
+			tokensInfo.totalFalCost += b.tokens?.totalFalCost ?? 0;
 		});
 
 		const globalBlocksMap = new Map(preparedGlobalBlocks.map((b) => [b.category, b]));
+		console.timeEnd('STEP GLOBAL BLOCKS');
+
+		console.time('STEP BLOCKS');
 		const pagesBlocks = flatPageBlocks(template.definition.pages);
 		const generatedBlocks = await Promise.allSettled(
 			pagesBlocks.map(async (blockDef) => {
@@ -107,10 +112,12 @@ export const createSite = async (request, reply) => {
 					} else {
 						const block = await getBlockByType(blockDef.type);
 						const preparedBlock = await prepareBlock(block, prompt, country, language);
+						console.log('preparedBlock', preparedBlock);
 
 						tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
 						tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 						tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
+						tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 
 						return {
 							hasError: false,
@@ -140,10 +147,15 @@ export const createSite = async (request, reply) => {
 			];
 		}, []);
 
-		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
-		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+		console.timeEnd('STEP BLOCKS');
+
+		const inputPrice =
+			tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
+		const outputPrice =
+			tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
 		const totalPrice = inputPrice + outputPrice;
 
+		console.time('STEP BUILD PAGES');
 		const sitePages = buildSitePages(pages, globalCss, language, country);
 		const siteConfigDetailed = {
 			pages: sitePages?.map((page) => ({
@@ -154,7 +166,9 @@ export const createSite = async (request, reply) => {
 			})),
 			generatedTheme,
 		};
+		console.timeEnd('STEP BUILD PAGES');
 
+		console.time('STEP ARCHIVE');
 		const zip = new AdmZip();
 		sitePages.forEach((page) => {
 			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
@@ -178,6 +192,8 @@ export const createSite = async (request, reply) => {
 
 		const { data: urlData } = supabase.storage.from('sites').getPublicUrl(safeName);
 
+		console.timeEnd('STEP ARCHIVE');
+
 		const [siteData] = await db
 			.insert(sites)
 			.values({
@@ -190,6 +206,7 @@ export const createSite = async (request, reply) => {
 				language: language,
 				definition: template.id,
 				prompt: prompt,
+				totalFalPrice: tokensInfo.totalFalCost,
 				totalTokens: tokensInfo.totalTokens,
 				completionTokens: tokensInfo.totalCompletionTokens,
 				siteConfigDetailed: siteConfigDetailed,
@@ -301,6 +318,10 @@ export const getAllSites = async (request, reply) => {
 				updatedAt: sites.updatedAt,
 				promptTokens: sites.promptTokens,
 				completionTokens: sites.completionTokens,
+				totalFalPrice: sites.totalFalPrice,
+				language: sites.language,
+				trafficSource: sites.trafficSource,
+				country: sites.country,
 				totalTokens: sites.totalTokens,
 				totalUsdPrice: sites.totalUsdPrice,
 				inputUsdPrice: sites.inputUsdPrice,
@@ -456,17 +477,17 @@ export const regenerateSite = async (request, reply) => {
 			throw new Error(`Failed to find site with id "${siteId}"`);
 		}
 
-		const { prompt, templateId, isActive, name, trafficSource, country, language } =
-			request.body;
+		const { prompt } = request.body;
 
 		const tokensInfo = {
 			totalPromptTokens: site.promptTokens,
 			totalCompletionTokens: site.completionTokens,
 			totalTokens: site.totalTokens,
+			totalFalCost: site.totalFalCost,
 		};
 
 		const template = await db.query.templates.findFirst({
-			where: eq(templates.id, templateId),
+			where: eq(templates.id, site.definition),
 		});
 
 		if (!template) {
@@ -506,13 +527,15 @@ export const regenerateSite = async (request, reply) => {
 			globalBlocks,
 			template?.definition?.pages,
 			prompt,
-			country,
-			language,
+			site.country,
+			site.language,
 		);
+
 		preparedGlobalBlocks.forEach((b) => {
 			tokensInfo.totalPromptTokens += b.tokens.promptTokens;
 			tokensInfo.totalCompletionTokens += b.tokens.completionTokens;
 			tokensInfo.totalTokens += b.tokens.totalTokens;
+			tokensInfo.totalFalCost += b.tokens?.totalFalCost;
 		});
 
 		const globalBlocksMap = new Map(preparedGlobalBlocks.map((b) => [b.category, b]));
@@ -536,11 +559,17 @@ export const regenerateSite = async (request, reply) => {
 						};
 					} else {
 						const block = await getBlockByType(blockDef.type);
-						const preparedBlock = await prepareBlock(block, prompt, country, language);
+						const preparedBlock = await prepareBlock(
+							block,
+							prompt,
+							site.country,
+							site.language,
+						);
 
 						tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
 						tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 						tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
+						tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 
 						return {
 							hasError: false,
@@ -570,11 +599,13 @@ export const regenerateSite = async (request, reply) => {
 			];
 		}, []);
 
-		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
-		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+		const inputPrice =
+			tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
+		const outputPrice =
+			tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
 		const totalPrice = inputPrice + outputPrice;
 
-		const sitePages = buildSitePages(pages, globalCss, language, country);
+		const sitePages = buildSitePages(pages, globalCss, site.language, site.country);
 		const siteConfigDetailed = {
 			pages: sitePages?.map((page) => ({
 				title: page.title,
@@ -585,34 +616,31 @@ export const regenerateSite = async (request, reply) => {
 			generatedTheme,
 		};
 
-		const urlData = replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl);
+		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl);
+
+		console.log('urlData', urlData);
 
 		const [siteData] = await db
 			.update(sites)
 			.set({
-				isDraft: true,
-				name: name,
-				isActive: isActive,
-				trafficSource: trafficSource,
 				archiveUrl: urlData.publicUrl,
-				country: country,
-				language: language,
-				definition: template.id,
 				prompt: prompt,
 				totalTokens: tokensInfo.totalTokens,
 				completionTokens: tokensInfo.totalCompletionTokens,
 				siteConfigDetailed: siteConfigDetailed,
 				promptTokens: tokensInfo.totalPromptTokens,
+				totalFalPrice: tokensInfo.totalFalPrice,
 				inputUsdPrice: cutNumber(inputPrice, 6),
 				outputUsdPrice: cutNumber(outputPrice, 6),
 				totalUsdPrice: cutNumber(totalPrice, 6),
-				createdBy: '67366103-2833-41a8-aea2-10d589a0705c',
 				updatedBy: '67366103-2833-41a8-aea2-10d589a0705c',
 			})
 			.where(eq(sites.id, siteId))
 			.returning();
 
-		return reply.status(201).send({
+		console.log('returned siteData', siteData);
+
+		return reply.status(200).send({
 			data: {
 				...siteData,
 				previews: sitePages.map((page) => ({
@@ -659,6 +687,7 @@ export const regenerateSite = async (request, reply) => {
 		// 	success: true,
 		// });
 	} catch (err) {
+		console.log('err', err);
 		reply.status(500).send({
 			error: err.message,
 			success: false,
@@ -688,6 +717,7 @@ export const regenerateBlock = async (request, reply) => {
 			totalPromptTokens: site.promptTokens,
 			totalCompletionTokens: site.completionTokens,
 			totalTokens: site.totalTokens,
+			totalFalCost: site.totalFalCost,
 		};
 
 		let generatedBlock;
@@ -704,6 +734,7 @@ export const regenerateBlock = async (request, reply) => {
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
 			tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 			tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
+			tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 			generatedBlock = preparedBlock;
 		} else {
 			const preparedBlock = await prepareBlock(
@@ -716,6 +747,7 @@ export const regenerateBlock = async (request, reply) => {
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
 			tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 			tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
+			tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 
 			generatedBlock = preparedBlock;
 		}
@@ -731,10 +763,7 @@ export const regenerateBlock = async (request, reply) => {
 				...page,
 				blocks: page.blocks.map((block, blockIndex) => {
 					if (block.generationBlockId !== generationBlockId) {
-						return {
-							...block,
-							id: block.blockId,
-						};
+						return block;
 					}
 
 					return {
@@ -759,7 +788,7 @@ export const regenerateBlock = async (request, reply) => {
 			site.language,
 			site.country,
 		);
-		const urlData = replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl);
+		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl);
 
 		const siteConfigDetailed = {
 			pages: sitePages?.map((page) => ({
@@ -770,8 +799,10 @@ export const regenerateBlock = async (request, reply) => {
 			})),
 			generatedTheme: site.siteConfigDetailed.generatedTheme,
 		};
-		const inputPrice = tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS.input / 1000000);
-		const outputPrice = tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS.output / 1000000);
+		const inputPrice =
+			tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
+		const outputPrice =
+			tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
 		const totalPrice = inputPrice + outputPrice;
 
 		const [siteData] = await db
@@ -781,6 +812,7 @@ export const regenerateBlock = async (request, reply) => {
 				totalTokens: tokensInfo.totalTokens,
 				completionTokens: tokensInfo.totalCompletionTokens,
 				promptTokens: tokensInfo.totalPromptTokens,
+				totalFalPrice: tokensInfo.totalFalCost,
 				inputUsdPrice: cutNumber(inputPrice, 6),
 				outputUsdPrice: cutNumber(outputPrice, 6),
 				totalUsdPrice: cutNumber(totalPrice, 6),
