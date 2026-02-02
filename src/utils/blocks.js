@@ -9,6 +9,7 @@ import nunjucks from 'nunjucks';
 import fs from 'fs/promises';
 import path from 'path';
 import { PRICE_FOR_PROMPTS_FALAI } from '../config/constants.js';
+import dayjs from 'dayjs';
 
 const openai = new OpenAI({
 	apiKey: process.env.OPEN_AI_KEY,
@@ -869,82 +870,84 @@ export const sumTokens = (target, source) => {
 	target.falTotalCost += source.falTotalCost || 0;
 };
 
-export const generateSitemapXml = (sitePages, domain = 'https://localhost:3000') => {
-	const baseUrl = domain.endsWith('/') ? domain : `${domain}/`;
-	const now = new Date();
-	const tzo = -now.getTimezoneOffset();
-	const dif = tzo >= 0 ? '+' : '-';
-	const pad = (num) => (num < 10 ? '0' : '') + num;
+export const generateSitemapXml = (sitePages, domain) => {
+	try {
+		let baseUrl;
 
-	const timestamp =
-		now.getFullYear() +
-		'-' +
-		pad(now.getMonth() + 1) +
-		'-' +
-		pad(now.getDate()) +
-		'T' +
-		pad(now.getHours()) +
-		':' +
-		pad(now.getMinutes()) +
-		':' +
-		pad(now.getSeconds()) +
-		dif +
-		pad(Math.floor(Math.abs(tzo) / 60)) +
-		':' +
-		pad(Math.abs(tzo) % 60);
+		try {
+			if (!domain) throw new Error('Domain is empty');
+			const urlObj = new URL(domain.startsWith('http') ? domain : `https://${domain}`);
+			baseUrl = urlObj.href.endsWith('/') ? urlObj.href : `${urlObj.href}/`;
+		} catch (e) {
+			console.error('Domain is not a valid URL');
+			throw new Error(
+				`Sitemap generation failed: Invalid domain "${domain}". Details: ${e.message}`,
+			);
+		}
+		const timestamp = dayjs().format('YYYY-MM-DDTHH:mm:ssZ');
 
-	const urlEntries = sitePages
-		.map((page) => {
-			const cleanPath =
-				page.path === '/' ? '' : page.path.replace(/^\//, '').replace(/\.html$/, '');
-			const loc = `${baseUrl}${cleanPath}`;
+		const urlEntries = sitePages
+			.map((page) => {
+				const cleanPath =
+					page.path === '/' ? '' : page.path.replace(/^\//, '').replace(/\.html$/, '');
+				const loc = `${baseUrl}${cleanPath}`;
 
-			// Собираем картинки
-			const imageUrls = [];
-			page.blocks.forEach((block) => {
-				if (!block.variables) return;
+				const imageUrls = [];
+				page.blocks.forEach((block) => {
+					if (!block.variables) return;
 
-				const findImagesRecursive = (obj) => {
-					if (!obj || typeof obj !== 'object') return;
-					if (obj.href && (obj.type === 'image' || obj.alt)) {
-						imageUrls.push({
-							loc: obj.href,
-							caption: obj.alt || obj.value || '',
-						});
-					}
-					Object.values(obj).forEach((value) => {
-						if (Array.isArray(value)) {
-							value.forEach((item) => findImagesRecursive(item));
-						} else if (typeof value === 'object') {
-							findImagesRecursive(value);
+					const findImagesRecursive = (obj) => {
+						if (!obj || typeof obj !== 'object') return;
+						if (obj.href && (obj.type === 'image' || obj.alt)) {
+							imageUrls.push({
+								loc: obj.href,
+								caption: obj.alt || obj.value || '',
+							});
 						}
-					});
-				};
-				findImagesRecursive(block.variables);
-			});
+						Object.values(obj).forEach((value) => {
+							if (Array.isArray(value)) {
+								value.forEach((item) => findImagesRecursive(item));
+							} else if (typeof value === 'object') {
+								findImagesRecursive(value);
+							}
+						});
+					};
+					findImagesRecursive(block.variables);
+				});
 
-			const imagesXml = imageUrls
-				.map(
-					(img) => `    <image:image>
+				const imagesXml = imageUrls
+					.map(
+						(img) => `    <image:image>
       <image:loc>${img.loc}</image:loc>
       <image:caption>${img.caption.replace(/[<>&"']/g, '')}</image:caption>
     </image:image>`,
-				)
-				.join('\n');
+					)
+					.join('\n');
 
-			return `  <url>
+				return `  <url>
     <loc>${loc}</loc>
     <lastmod>${timestamp}</lastmod>
     <changefreq>${page.path === '/' ? 'daily' : 'monthly'}</changefreq>
     <priority>${page.path === '/' ? '1.0' : '0.8'}</priority>
 ${imagesXml}
   </url>`;
-		})
-		.join('\n');
+			})
+			.join('\n');
 
-	return `<?xml version="1.0" encoding="UTF-8"?>
+		return {
+			siteMapBody: `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
 ${urlEntries}
-</urlset>`;
+</urlset>`,
+			status: 200,
+			errorMessage: null,
+		};
+	} catch (e) {
+		return {
+			siteMapBody: null,
+			status: 400,
+			errorMessage: e.message,
+		};
+	}
 };

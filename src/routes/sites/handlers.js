@@ -30,7 +30,7 @@ function cutNumber(number, amountAfterDot) {
 
 export const createSite = async (request, reply) => {
 	try {
-		const { prompt, templateId, isActive, name, trafficSource, country, language } =
+		const { prompt, templateId, isActive, name, trafficSource, country, language, domain } =
 			request.body;
 
 		const template = await db.query.templates.findFirst({
@@ -119,8 +119,7 @@ export const createSite = async (request, reply) => {
 
 		console.time('STEP BUILD PAGES');
 		const sitePages = buildSitePages(pages, globalCss, language, country);
-		console.log('sitePages', JSON.stringify(sitePages, 2, null));
-		const sitemapXml = generateSitemapXml(sitePages);
+		const sitemapXml = generateSitemapXml(sitePages, domain);
 		const siteConfigDetailed = {
 			pages: sitePages?.map((page) => ({
 				title: page.title,
@@ -137,8 +136,9 @@ export const createSite = async (request, reply) => {
 		sitePages.forEach((page) => {
 			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
 		});
-		zip.addFile('sitemap.xml', Buffer.from(sitemapXml, 'utf8'));
-
+		if (sitemapXml.status == 200) {
+			zip.addFile('sitemap.xml', Buffer.from(sitemapXml.siteMapBody, 'utf8'));
+		}
 		const zipBuffer = zip.toBuffer();
 		const safeName = slugify(`site-${name}-${new Date().getTime()}.zip`, {
 			lower: true,
@@ -203,6 +203,10 @@ export const createSite = async (request, reply) => {
 					})),
 				})),
 				siteConfigDetailed,
+				siteMapGeneration: {
+					status: sitemapXml.status,
+					errorMessage: sitemapXml.errorMessage,
+				},
 			},
 			success: true,
 		});
