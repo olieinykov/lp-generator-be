@@ -12,6 +12,7 @@ import {
 	flatPageBlocks,
 	generatePageBlocksContent,
 	generatePageSeo,
+	generateSitemapXml,
 	generateTheme,
 	getBlockByType,
 	getBlocks,
@@ -118,6 +119,8 @@ export const createSite = async (request, reply) => {
 
 		console.time('STEP BUILD PAGES');
 		const sitePages = buildSitePages(pages, globalCss, language, country);
+		console.log('sitePages', JSON.stringify(sitePages, 2, null));
+		const sitemapXml = generateSitemapXml(sitePages);
 		const siteConfigDetailed = {
 			pages: sitePages?.map((page) => ({
 				title: page.title,
@@ -134,6 +137,7 @@ export const createSite = async (request, reply) => {
 		sitePages.forEach((page) => {
 			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
 		});
+		zip.addFile('sitemap.xml', Buffer.from(sitemapXml, 'utf8'));
 
 		const zipBuffer = zip.toBuffer();
 		const safeName = slugify(`site-${name}-${new Date().getTime()}.zip`, {
@@ -742,69 +746,69 @@ export const regenerateBlock = async (request, reply) => {
 				}),
 			};
 		});
+		console.log('updatedPages', JSON.stringify(updatedPages, 2, null));
+		//const sitePages = buildSitePages(
+		//	updatedPages,
+		//	site.siteConfigDetailed.generatedTheme,
+		//	site.language,
+		//	site.country,
+		//);
+		//const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl);
 
-		const sitePages = buildSitePages(
-			updatedPages,
-			site.siteConfigDetailed.generatedTheme,
-			site.language,
-			site.country,
-		);
-		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl);
+		//const siteConfigDetailed = {
+		//	pages: sitePages?.map((page) => ({
+		//		title: page.title,
+		//		path: page.path,
+		//		filename: page.filename,
+		//		blocks: page.blocks,
+		//	})),
+		//	generatedTheme: site.siteConfigDetailed.generatedTheme,
+		//};
+		//const inputPrice =
+		//	tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
+		//const outputPrice =
+		//	tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
+		//const totalPrice = inputPrice + outputPrice;
 
-		const siteConfigDetailed = {
-			pages: sitePages?.map((page) => ({
-				title: page.title,
-				path: page.path,
-				filename: page.filename,
-				blocks: page.blocks,
-			})),
-			generatedTheme: site.siteConfigDetailed.generatedTheme,
-		};
-		const inputPrice =
-			tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
-		const outputPrice =
-			tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
-		const totalPrice = inputPrice + outputPrice;
+		//const [siteData] = await db
+		//	.update(sites)
+		//	.set({
+		//		archiveUrl: urlData.publicUrl,
+		//		totalTokens: tokensInfo.totalTokens,
+		//		completionTokens: tokensInfo.totalCompletionTokens,
+		//		promptTokens: tokensInfo.totalPromptTokens,
+		//		totalFalPrice: tokensInfo.totalFalCost,
+		//		inputUsdPrice: cutNumber(inputPrice, 6),
+		//		outputUsdPrice: cutNumber(outputPrice, 6),
+		//		totalUsdPrice: cutNumber(totalPrice, 6),
+		//		updatedBy: '67366103-2833-41a8-aea2-10d589a0705c',
+		//		siteConfigDetailed,
+		//	})
+		//	.where(eq(sites.id, siteId))
+		//	.returning();
 
-		const [siteData] = await db
-			.update(sites)
-			.set({
-				archiveUrl: urlData.publicUrl,
-				totalTokens: tokensInfo.totalTokens,
-				completionTokens: tokensInfo.totalCompletionTokens,
-				promptTokens: tokensInfo.totalPromptTokens,
-				totalFalPrice: tokensInfo.totalFalCost,
-				inputUsdPrice: cutNumber(inputPrice, 6),
-				outputUsdPrice: cutNumber(outputPrice, 6),
-				totalUsdPrice: cutNumber(totalPrice, 6),
-				updatedBy: '67366103-2833-41a8-aea2-10d589a0705c',
-				siteConfigDetailed,
-			})
-			.where(eq(sites.id, siteId))
-			.returning();
-
-		return reply.status(201).send({
-			data: {
-				...siteData,
-				previews: sitePages.map((page) => ({
-					html: page.html,
-					filename: page.filename,
-					hasErrors: page.pageHasErrors,
-				})),
-				siteConfig: siteConfigDetailed?.pages?.map((page) => ({
-					...page,
-					blocks: page?.blocks?.map((block) => ({
-						blockId: block.blockId,
-						isGlobal: block.isGlobal,
-						blockType: block.blockType,
-						generationBlockId: block.generationBlockId,
-						hasError: block.hasError,
-					})),
-				})),
-				siteConfigDetailed,
-			},
-			success: true,
-		});
+		//return reply.status(201).send({
+		//	data: {
+		//		...siteData,
+		//		previews: sitePages.map((page) => ({
+		//			html: page.html,
+		//			filename: page.filename,
+		//			hasErrors: page.pageHasErrors,
+		//		})),
+		//		siteConfig: siteConfigDetailed?.pages?.map((page) => ({
+		//			...page,
+		//			blocks: page?.blocks?.map((block) => ({
+		//				blockId: block.blockId,
+		//				isGlobal: block.isGlobal,
+		//				blockType: block.blockType,
+		//				generationBlockId: block.generationBlockId,
+		//				hasError: block.hasError,
+		//			})),
+		//		})),
+		//		siteConfigDetailed,
+		//	},
+		//	success: true,
+		//});
 	} catch (err) {
 		reply.status(500).send({
 			error: err.message,

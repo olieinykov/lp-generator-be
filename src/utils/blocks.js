@@ -868,3 +868,83 @@ export const sumTokens = (target, source) => {
 	target.totalTokens += source.totalTokens || 0;
 	target.falTotalCost += source.falTotalCost || 0;
 };
+
+export const generateSitemapXml = (sitePages, domain = 'https://localhost:3000') => {
+	const baseUrl = domain.endsWith('/') ? domain : `${domain}/`;
+	const now = new Date();
+	const tzo = -now.getTimezoneOffset();
+	const dif = tzo >= 0 ? '+' : '-';
+	const pad = (num) => (num < 10 ? '0' : '') + num;
+
+	const timestamp =
+		now.getFullYear() +
+		'-' +
+		pad(now.getMonth() + 1) +
+		'-' +
+		pad(now.getDate()) +
+		'T' +
+		pad(now.getHours()) +
+		':' +
+		pad(now.getMinutes()) +
+		':' +
+		pad(now.getSeconds()) +
+		dif +
+		pad(Math.floor(Math.abs(tzo) / 60)) +
+		':' +
+		pad(Math.abs(tzo) % 60);
+
+	const urlEntries = sitePages
+		.map((page) => {
+			const cleanPath =
+				page.path === '/' ? '' : page.path.replace(/^\//, '').replace(/\.html$/, '');
+			const loc = `${baseUrl}${cleanPath}`;
+
+			// Собираем картинки
+			const imageUrls = [];
+			page.blocks.forEach((block) => {
+				if (!block.variables) return;
+
+				const findImagesRecursive = (obj) => {
+					if (!obj || typeof obj !== 'object') return;
+					if (obj.href && (obj.type === 'image' || obj.alt)) {
+						imageUrls.push({
+							loc: obj.href,
+							caption: obj.alt || obj.value || '',
+						});
+					}
+					Object.values(obj).forEach((value) => {
+						if (Array.isArray(value)) {
+							value.forEach((item) => findImagesRecursive(item));
+						} else if (typeof value === 'object') {
+							findImagesRecursive(value);
+						}
+					});
+				};
+				findImagesRecursive(block.variables);
+			});
+
+			const imagesXml = imageUrls
+				.map(
+					(img) => `    <image:image>
+      <image:loc>${img.loc}</image:loc>
+      <image:caption>${img.caption.replace(/[<>&"']/g, '')}</image:caption>
+    </image:image>`,
+				)
+				.join('\n');
+
+			return `  <url>
+    <loc>${loc}</loc>
+    <lastmod>${timestamp}</lastmod>
+    <changefreq>${page.path === '/' ? 'daily' : 'monthly'}</changefreq>
+    <priority>${page.path === '/' ? '1.0' : '0.8'}</priority>
+${imagesXml}
+  </url>`;
+		})
+		.join('\n');
+
+	return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+${urlEntries}
+</urlset>`;
+};
