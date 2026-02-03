@@ -47,7 +47,6 @@ export const createSite = async (request, reply) => {
 			totalTokens: 0,
 			totalFalCost: 0,
 		};
-
 		const [themeResult, seoDataResults, globalBlocksData] = await Promise.all([
 			generateTheme(prompt),
 			Promise.all(

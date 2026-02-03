@@ -1,6 +1,6 @@
 import { db } from '../db/connection.js';
 import { blocks } from '../db/schema.js';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, notInArray, sql } from 'drizzle-orm';
 import { downloadAndUnzipBlock } from './zipHandler.js';
 import OpenAI from 'openai';
 import * as fal from '@fal-ai/serverless-client';
@@ -118,11 +118,17 @@ export const processImagesPageStructure = async (content, structure) => {
 
 // ==================== БАЗОВЫЕ ОПЕРАЦИИ ====================
 
-export const getBlockByType = async (type) => {
+export const getBlockByType = async (type, usedId = []) => {
 	const [block] = await db
 		.select()
 		.from(blocks)
-		.where(and(eq(blocks.category, type), eq(blocks.isActive, true)))
+		.where(
+			and(
+				eq(blocks.category, type),
+				eq(blocks.isActive, true),
+				notInArray(blocks.id, usedId),
+			),
+		)
 		.orderBy(sql`RANDOM()`)
 		.limit(1);
 
@@ -139,6 +145,21 @@ export const getBlockByType = async (type) => {
 	};
 };
 
+export const getUniqueBlock = async (type, usedTypeIds = []) => {
+	try {
+		const blockInfo = await getBlockByType(type, usedTypeIds);
+		return {
+			blockInfo,
+			updatedIds: [...usedTypeIds, blockInfo.id],
+		};
+	} catch (e) {
+		if (e.message === `No active block found for type: ${type}`) {
+			if (usedTypeIds.length === 0) throw e;
+			return await getUniqueBlock(type, []);
+		}
+		throw e;
+	}
+};
 export const generateBlockContent = async (
 	variables,
 	blockCategory,
@@ -786,6 +807,7 @@ export const flatPageBlocks1 = (pages) => {
 export const pageBlocksVars = async (blocks, globalBlocks) => {
 	const pageStructureObj = {};
 	const processBlocks = {};
+	const usedIds = {};
 	let counter = 0;
 
 	const processRecursive = async (blockList, targetObjFull, targetObjProcess, isChildren) => {
@@ -804,8 +826,12 @@ export const pageBlocksVars = async (blocks, globalBlocks) => {
 				};
 				continue;
 			}
-			const dbBlock = await getBlockByType(blockDef.type);
-
+			const currentTypeIds = usedIds[blockDef.type] || [];
+			const { blockInfo: dbBlock, updatedIds } = await getUniqueBlock(
+				blockDef.type,
+				currentTypeIds,
+			);
+			usedIds[blockDef.type] = updatedIds;
 			const currentKey = isChildren ? 'childrenBlock' : `block${counter++}`;
 			targetObjFull[currentKey] = {
 				id: dbBlock.id,
