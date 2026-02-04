@@ -13,7 +13,7 @@ import {
 	prepareGlobalBlocks,
 } from '../../utils/blocks.js';
 import { replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
-import {generateSite, generateSitemapXml} from "../../utils/generator.js";
+import { generateSite, generateSitemapXml } from '../../utils/generator.js';
 
 function cutNumber(number, amountAfterDot) {
 	const factor = 10 ** amountAfterDot;
@@ -45,12 +45,11 @@ export const createSite = async (request, reply) => {
 			template,
 			prompt,
 			country,
-			language
+			language,
 		});
 
-		let tempDomain = "http://localhost:3000"
+		let tempDomain = 'http://localhost:3000';
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
-
 
 		const zip = new AdmZip();
 		sitePages.forEach((page) => {
@@ -114,7 +113,7 @@ export const createSite = async (request, reply) => {
 			success: true,
 		});
 	} catch (error) {
-		console.log("error", error);
+		console.log('error', error);
 		return reply.status(500).send({ error: error.message });
 	}
 };
@@ -375,8 +374,6 @@ export const regenerateSite = async (request, reply) => {
 			language: site.language,
 		});
 
-
-
 		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl);
 
 		const [siteData] = await db
@@ -406,7 +403,6 @@ export const regenerateSite = async (request, reply) => {
 			},
 			success: true,
 		});
-
 	} catch (err) {
 		reply.status(500).send({
 			error: err.message,

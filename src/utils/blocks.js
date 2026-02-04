@@ -342,7 +342,6 @@ export const prepareGlobalBlocks = async (
 	return results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
 };
 
-
 const scopeCss = (scss, blockId) => {
 	try {
 		const replacedScss = scss.replace(/#_blockId/g, `#${blockId}`);
@@ -538,13 +537,12 @@ export const flatPageBlocks = (pages) => {
 	}, []);
 };
 
-
 export const generateAllPagesSeo = async (pages, prompt, language, country) => {
 	const systemPrompt = `Generate SEO attributes for multiple website pages.
 
 Language: ${language}
 Country: ${country}
-Pages: ${pages.map(p => p.title).join(', ')}
+Pages: ${pages.map((p) => p.title).join(', ')}
 
 Return JSON array where each object has:
 {
@@ -570,11 +568,11 @@ Return format:
 				{ role: 'system', content: systemPrompt },
 				{
 					role: 'user',
-					content: `Pages: ${pages.map(p => p.title).join('\n')}\n\nPrompt: ${prompt}`
-				}
+					content: `Pages: ${pages.map((p) => p.title).join('\n')}\n\nPrompt: ${prompt}`,
+				},
 			],
 			temperature: 1,
-			response_format: { type: "json_object" }
+			response_format: { type: 'json_object' },
 		});
 
 		const result = JSON.parse(completion.choices[0].message.content);
@@ -587,7 +585,7 @@ Return format:
 				keywords: `${page.title}, ${country}`,
 				ogTitle: page.title,
 				ogDescription: `${page.title} in ${country}`,
-			})
+			}),
 		}));
 
 		return [
@@ -596,10 +594,10 @@ Return format:
 				totalPromptTokens: completion.usage.prompt_tokens,
 				totalCompletionTokens: completion.usage.completion_tokens,
 				totalTokens: completion.usage.total_tokens,
-			}
+			},
 		];
 	} catch (error) {
-		const fallbackSeo = pages.map(page => ({
+		const fallbackSeo = pages.map((page) => ({
 			title: `${page.title} | ${country}`,
 			description: `${page.title} services in ${country}`,
 			keywords: `${page.title.toLowerCase().replace(/\s+/g, ', ')}, ${country}`,
