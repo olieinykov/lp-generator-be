@@ -32,6 +32,10 @@ export const createSiteSchema = {
 				type: 'string',
 				maxLength: 50,
 			},
+			domain: {
+				type: 'string',
+				maxLength: 255,
+			},
 		},
 	},
 };
