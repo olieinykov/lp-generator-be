@@ -8,12 +8,14 @@ import { PRICE_FOR_PROMPTS_OPENAI } from '../../config/constants.js';
 import slugify from 'slugify';
 import {
 	buildSitePages,
+	fillGlobalBlocksVars,
 	fillPageVariables,
 	flatPageBlocks,
 	generatePageBlocksContent,
 	generatePageSeo,
 	generateSitemapXml,
 	generateTheme,
+	getAnchorsList,
 	getBlockByType,
 	getBlocks,
 	pageBlocksVars,
@@ -47,6 +49,33 @@ export const createSite = async (request, reply) => {
 			totalTokens: 0,
 			totalFalCost: 0,
 		};
+
+		const blocksPageStructure = await Promise.all(
+			template.definition.pages.map(async (page) => {
+				const { pageStructureObj, processBlocks } = await pageBlocksVars(
+					page.layout,
+					template.definition.globals.blocks,
+				);
+
+				const [aiContent, tokens] = await generatePageBlocksContent(
+					processBlocks,
+					prompt,
+					country,
+					language,
+				);
+
+				const finalPageStructure = fillPageVariables(pageStructureObj, aiContent);
+
+				return {
+					pageData: {
+						...page,
+						finalPageStructure,
+					},
+					tokens,
+				};
+			}),
+		);
+		const anchorsList = getAnchorsList(blocksPageStructure);
 		const [themeResult, seoDataResults, globalBlocksData] = await Promise.all([
 			generateTheme(prompt),
 			Promise.all(
@@ -64,43 +93,27 @@ export const createSite = async (request, reply) => {
 					prompt,
 					country,
 					language,
+					anchorsList,
 				);
 			})(),
 		]);
-
 		const { theme: generatedTheme, tokens: themeTokens } = themeResult;
-		const globalBlocksMap = new Map(globalBlocksData.map((b) => [b.category, b]));
-
-		const pagesResults = await Promise.all(
-			template.definition.pages.map(async (page, pageIndex) => {
+		const pagesResults = fillGlobalBlocksVars(blocksPageStructure, globalBlocksData).map(
+			(page, pageIndex) => {
 				const seoEntry = seoDataResults[pageIndex];
 				const pageSeo = Array.isArray(seoEntry) ? seoEntry[0] : {};
 
-				const { pageStructureObj, processBlocks } = await pageBlocksVars(
-					page.layout,
-					globalBlocksMap,
-				);
-
-				const [aiContent, tokens] = await generatePageBlocksContent(
-					processBlocks,
-					prompt,
-					country,
-					language,
-				);
-
-				const finalPageStructure = fillPageVariables(pageStructureObj, aiContent);
-
 				return {
 					pageData: {
-						...page,
-						finalPageStructure,
+						...page.pageData,
 						seo: pageSeo,
 					},
-					tokens,
+					tokens: {
+						...page.tokens,
+					},
 				};
-			}),
+			},
 		);
-
 		sumTokens(tokensInfo, themeTokens);
 		seoDataResults.forEach((res) => Array.isArray(res) && sumTokens(tokensInfo, res[1]));
 		globalBlocksData.forEach((b) => sumTokens(tokensInfo, b.tokens));

@@ -167,9 +167,10 @@ export const generateBlockContent = async (
 	country,
 	language,
 	templatePages = null,
+	anchors = [],
 ) => {
 	const filteredVariables = Object.entries(variables).filter(([name, v]) => v.type !== 'nav');
-
+	const anchorsContext = JSON.stringify(anchors, 2, null);
 	const variablesDescription = filteredVariables
 		.map(([name, v]) => `- ${name} (type: ${v.type})`)
 		.join('\n');
@@ -202,13 +203,28 @@ Your task:
 - Generate NATURAL, human-readable text
 
 ${navInstruction}
+
+=====================
+ANCHORS CONTEXT (REFERENCE):
+=====================
+Use the following anchor IDs to populate variables with type "anchors":
+${anchorsContext}
+
 =====================
 CONTENT VARIABLES RULES
 =====================
 1. TEXT VARIABLES: {"variableName": {"value": "text content"}}
 2. IMAGE VARIABLES: {"variableName": {"href": "detailed image description for AI image generation", "alt": "alt text"}}
 3. LINK VARIABLES: {"variableName": {"value": null, "href": "url", "label": "text"}}
-4. ARRAY VARIABLES: 
+4. ANCHORS TYPE (CRITICAL):
+   If you encounter a variable with type "anchors", you must fill the "value" array.
+   Since the context is a list of pages, "value" MUST be an array where each item is a nested array of anchor objects for that specific page.
+   
+   Structure for each anchor object:
+   - "href": Exact ID from context preceded by '#' (e.g., "#benefits1")
+   - "label": A localized, short name in ${language} (MAX 2 words).
+
+5. ARRAY VARIABLES: 
    For array variables, fill the "values" array with complete objects.
    Each object in the array should contain all its nested fields.
 
@@ -239,6 +255,18 @@ Return a FLAT JSON object where each key is the variable name.
 
 CORRECT FORMAT:
 {
+ "blockAnchors": {
+    "type": "anchors",
+    "value": [
+      [
+        { "href": "#hero1", "label": "Головна" },
+        { "href": "#info2", "label": "Про нас" }
+      ],
+      [
+        { "href": "#hydration1", "label": "Гідратація" }
+      ]
+    ]
+  },
   "tagline": {"value": "Our Services"},
   "title": {"value": "What We Offer"},
   "description": {"value": "Comprehensive solutions for your needs"},
@@ -323,10 +351,20 @@ CONTENT VARIABLE FORMATS:
 1. "text": {"variableName": {"value": "text"}}
 2. "image": {"variableName": {"href": "detailed image description for AI image generation", "alt": "alt text"}}
 3. "link": {"variableName": {"value": null, "href": "url", "label": "text"}}
-4. "array": {"variableName": {"type": "array", "values": [...]}}
-5. Tel: {"variableName": {"value": "Phone number in international format for ${country}"}}
-6. Address: {"variableName": {"value": "Full realistic address in ${country}"}}
-7. Email: {"variableName": {"value": "valid-email@example.com"}}
+4. "anchor": {"variableName": {"id": "single-word-id"}}
+5. "array": {"variableName": {"type": "array", "values": [...]}}
+6. Tel: {"variableName": {"value": "Phone number in international format for ${country}"}}
+7. Address: {"variableName": {"value": "Full realistic address in ${country}"}}
+8. Email: {"variableName": {"value": "valid-email@example.com"}}
+
+=====================
+ANCHOR ID RULES (CRITICAL):
+=====================
+1. Language: Always in ENGLISH.
+2. Format: Single word + Block Number (e.g., if the block key is "block3", the id should be "prices3").
+3. Context: Must be logically related to the block's content.
+4. Consistency: The suffix number MUST exactly match the index number from the block key (e.g., block0 -> about0, block5 -> contacts5).
+5. Uniqueness: This ensures every anchor on the page is unique.
 
 =====================
 LOCALIZATION RULES:
@@ -480,6 +518,7 @@ export const prepareGlobalBlocks = async (
 	prompt,
 	country,
 	language,
+	anchors,
 ) => {
 	let navigationLabels = null;
 
@@ -499,6 +538,7 @@ export const prepareGlobalBlocks = async (
 					country,
 					language,
 					needsNavLabels ? templatePages : null,
+					anchors,
 				);
 
 				if (aiContent.navigationLabels) {
@@ -810,19 +850,15 @@ export const pageBlocksVars = async (blocks, globalBlocks) => {
 	const usedIds = {};
 	let counter = 0;
 
+	const globalTypes = globalBlocks.map((b) => b.type) || [];
 	const processRecursive = async (blockList, targetObjFull, targetObjProcess, isChildren) => {
 		for (const blockDef of blockList) {
-			if (globalBlocks.has(blockDef.type)) {
-				const currGlobalBlock = globalBlocks.get(blockDef.type);
+			const isGlobal = globalTypes.includes(blockDef.type);
+
+			if (isGlobal) {
 				targetObjFull[`block${counter++}`] = {
-					id: currGlobalBlock.id,
 					category: blockDef.type,
-					variables: currGlobalBlock.variables,
-					definition: currGlobalBlock.definition,
-					html: currGlobalBlock.html,
-					css: currGlobalBlock.css,
 					isGlobal: true,
-					hasError: currGlobalBlock.hasError,
 				};
 				continue;
 			}
@@ -866,17 +902,40 @@ export const pageBlocksVars = async (blocks, globalBlocks) => {
 	};
 };
 
+export const getAnchorsList = (pagesArray) => {
+	return pagesArray.map((item) => {
+		const blocks = item.pageData?.finalPageStructure || {};
+		const anchors = [];
+		Object.values(blocks).forEach((block) => {
+			const vars = block.variables;
+			if (!vars) return;
+			const anchorVar = Object.values(vars).find((v) => v.type === 'anchor');
+
+			if (anchorVar && anchorVar.id) {
+				anchors.push({
+					id: anchorVar.id,
+					href: '',
+				});
+			}
+		});
+
+		return {
+			anchors: anchors,
+		};
+	});
+};
+
 export const fillPageVariables = (target, source) => {
 	for (const key in source) {
 		if (!target[key]) continue;
 
 		const sourceBlock = source[key];
 		const targetBlock = target[key];
-
-		if (sourceBlock.variables && Object.keys(sourceBlock.variables).length > 0) {
-			targetBlock.variables = sourceBlock.variables;
-			targetBlock.hasError = false;
-		}
+		if (sourceBlock)
+			if (sourceBlock.variables && Object.keys(sourceBlock.variables).length > 0) {
+				targetBlock.variables = sourceBlock.variables;
+				targetBlock.hasError = false;
+			}
 
 		if (sourceBlock.childrenBlock) {
 			if (!targetBlock.childrenBlock) {
@@ -886,6 +945,49 @@ export const fillPageVariables = (target, source) => {
 		}
 	}
 	return target;
+};
+
+export const fillGlobalBlocksVars = (pages, globalBlocks) => {
+	return pages.map((page, index) => {
+		const structure = page.pageData.finalPageStructure;
+
+		for (const blockKey in structure) {
+			const currentBlock = structure[blockKey];
+
+			if (currentBlock.isGlobal) {
+				const sourceData = globalBlocks.find((g) => g.category === currentBlock.category);
+
+				if (sourceData) {
+					const updatedVariables = JSON.parse(JSON.stringify(sourceData.variables));
+					for (const varKey in updatedVariables) {
+						const variable = updatedVariables[varKey];
+						if (variable && variable.type === 'anchors') {
+							const allPagesAnchors = variable.value;
+							if (
+								Array.isArray(allPagesAnchors) &&
+								Array.isArray(allPagesAnchors[index])
+							) {
+								variable.value = allPagesAnchors[index];
+							} else {
+								variable.value = [];
+							}
+						}
+					}
+
+					Object.assign(currentBlock, {
+						id: sourceData.id,
+						html: sourceData.html,
+						css: sourceData.css,
+						definition: sourceData.definition,
+						variables: updatedVariables,
+						hasError: sourceData.hasError || false,
+					});
+				}
+			}
+		}
+
+		return page;
+	});
 };
 
 export const sumTokens = (target, source) => {
