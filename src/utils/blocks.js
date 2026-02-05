@@ -3,12 +3,11 @@ import { blocks } from '../db/schema.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { downloadAndUnzipBlock } from './zipHandler.js';
 import OpenAI from 'openai';
-import * as fal from '@fal-ai/serverless-client';
+import { fal } from '@fal-ai/client';
 import * as sass from 'sass';
 import nunjucks from 'nunjucks';
 import fs from 'fs/promises';
 import path from 'path';
-import { PRICE_FOR_PROMPTS_FALAI } from '../config/constants.js';
 
 const openai = new OpenAI({
 	apiKey: process.env.OPEN_AI_KEY,
@@ -18,25 +17,57 @@ fal.config({
 	credentials: process.env.FAL_KEY,
 });
 
+// const generateImageWithFal = async (prompt) => {
+// 	try {
+// 		const result = await fal.subscribe('fal-ai/flux/schnell', {
+// 			input: {
+// 				prompt: prompt,
+// 				image_size: 'landscape_16_9',
+// 				num_inference_steps: 4,
+// 				num_images: 1,
+// 			},
+// 		});
+// 		const image = result.images[0];
+// 		const megapixels = (image.width * image.height) / 1000000;
+// 		const cost = megapixels * PRICE_FOR_PROMPTS_FALAI.perMegaPixel;
+//
+// 		return { url: image.url, cost: cost };
+// 	} catch (error) {
+// 		return {
+// 			url: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=600`,
+// 			cost: 0,
+// 		};
+// 	}
+// };
+
 const generateImageWithFal = async (prompt) => {
 	try {
-		const result = await fal.subscribe('fal-ai/flux/schnell', {
+		const { data } = await fal.run('fal-ai/flux/schnell', {
 			input: {
+				// prompt: `TRANSPARENT PNG LOGO: ${prompt}. Minimalist, vector, solid colors, no background`,
 				prompt: prompt,
-				image_size: 'landscape_16_9',
+				negative_prompt: 'background, text, gradient, shadow, realistic, photo',
+				image_size: 'square_hd',
 				num_inference_steps: 4,
-				num_images: 1,
+				guidance_scale: 3.5,
+				sync_mode: true
 			},
 		});
-		const image = result.images[0];
-		const megapixels = (image.width * image.height) / 1000000;
-		const cost = megapixels * PRICE_FOR_PROMPTS_FALAI.perMegaPixel;
 
-		return { url: image.url, cost: cost };
+		const image = data.images[0];
+		const cost = (image.width * image.height / 1000000) * 0.0039;
+
+		return {
+			url: image.url,
+			cost: Number(cost.toFixed(4)),
+			size: `${image.width}x${image.height}`
+		};
+
 	} catch (error) {
 		return {
-			url: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=600`,
+			url: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&format=png`,
 			cost: 0,
+			error: true
 		};
 	}
 };
