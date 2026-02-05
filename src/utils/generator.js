@@ -85,8 +85,13 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 						};
 					} else {
 						const block = await getBlockByType(blockDef.type);
-						const preparedBlock = await prepareBlock(block, prompt, country, language);
-
+						const preparedBlock = await prepareBlock(
+							block,
+							prompt,
+							country,
+							language,
+							blockDef.pageTitle,
+						);
 						tokens.totalPromptTokens += preparedBlock.tokens.promptTokens;
 						tokens.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 						tokens.totalTokens += preparedBlock.tokens.totalTokens;
@@ -124,7 +129,6 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 			tokens,
 		};
 	};
-
 	const populateTheme = async () => {
 		const { theme: generatedTheme, tokens: themeTokens } = await generateTheme(prompt);
 

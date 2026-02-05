@@ -50,7 +50,7 @@ const generateImageWithFal = async (prompt) => {
 				image_size: 'square_hd',
 				num_inference_steps: 4,
 				guidance_scale: 3.5,
-				sync_mode: true,
+				//sync_mode: true,
 			},
 		});
 
@@ -127,6 +127,7 @@ export const generateBlockContent = async (
 	country,
 	language,
 	templatePages = null,
+	pageTitle,
 ) => {
 	const filteredVariables = Object.entries(variables).filter(([name, v]) => v.type !== 'nav');
 
@@ -154,9 +155,11 @@ Labels must be in ${language}, short (1-3 words), natural for website navigation
 STRICT LOCALIZATION & CONTEXT RULES:
 - Language: ${language}
 - Country: ${country}
+- CURRENT PAGE TOPIC/TITLE: ${pageTitle}
 
 Your task:
 - Generate content variables for the block type: ${blockCategory}
+- ALL generated text must be strictly relevant to the page topic: "${pageTitle}"
 - DO NOT generate navigation structure — it will be provided separately
 - DO NOT generate any CSS, styles, or design tokens
 - Generate NATURAL, human-readable text
@@ -196,6 +199,7 @@ ${variablesDescription}
 OUTPUT FORMAT
 =====================
 Return a FLAT JSON object where each key is the variable name.
+The content should be specifically tailored to the context of "${pageTitle}".
 
 CORRECT FORMAT:
 {
@@ -260,7 +264,14 @@ Return ONLY valid JSON. All text in ${language}.
 	];
 };
 
-export const prepareBlock = async (block, prompt, country, language, navigation = null) => {
+export const prepareBlock = async (
+	block,
+	prompt,
+	country,
+	language,
+	pageTitle,
+	navigation = null,
+) => {
 	try {
 		if (block.hasError) {
 			throw new Error(block.error);
@@ -271,12 +282,13 @@ export const prepareBlock = async (block, prompt, country, language, navigation 
 			prompt,
 			country,
 			language,
+			null,
+			pageTitle,
 		);
 
 		console.log('aiContent', aiContent);
 
 		const variables = navigation ? { ...aiContent, navigation } : aiContent;
-
 		return { ...block, variables, tokens };
 	} catch (error) {
 		return {
@@ -560,6 +572,7 @@ export const flatPageBlocks = (pages) => {
 		const pageBlocks = (page?.layout ?? []).map((blockDef, blockIndex) => ({
 			blockIndex: blockIndex,
 			pageIndex: pageIndex,
+			pageTitle: page.title,
 			...blockDef,
 		}));
 
@@ -617,9 +630,6 @@ Return JSON format:
 		});
 
 		const result = JSON.parse(completion.choices[0].message.content);
-
-		console.log(JSON.stringify(result, 2, null));
-
 		const pagesInfo = pages.map((page, index) => {
 			return { pageName: result.pages[index].title, pagePath: result.pages[index].path };
 		});
