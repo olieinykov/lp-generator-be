@@ -19,15 +19,27 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		totalFalCost: currentTokens.totalFalCost ?? 0,
 	};
 
-	const populateSEO = async (pages, prompt, language, country) => {
-		const [seoPages, seoTokens] = await generateAllPagesSeo(pages, prompt, language, country);
+	const populatePagesInfo = async (pages, prompt, language, country) => {
+		const [pageInfo, seoPages, pagesInfoTokens] = await generateAllPagesSeo(
+			pages,
+			prompt,
+			language,
+			country,
+		);
 
-		return {
-			seoPages,
-			tokens: seoTokens,
-		};
+		return { pageInfo, seoPages, tokens: pagesInfoTokens };
 	};
-
+	const {
+		pageInfo,
+		seoPages,
+		tokens: pagesInfoTokens,
+	} = await populatePagesInfo(template.definition.pages, prompt, language, country);
+	template.definition.pages.forEach((page, pageIndex) => {
+		const info = pageInfo[pageIndex] || {};
+		const actualName = info.pageName;
+		page.title = actualName;
+		page.path = info.pagePath === '/' ? info.pagePath : '/' + info.pagePath;
+	});
 	const populatePagesWithContent = async (template) => {
 		const tokens = {
 			totalPromptTokens: 0,
@@ -122,26 +134,19 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		};
 	};
 
-	const final = await Promise.all([
-		populateTheme(prompt),
-		populatePagesWithContent(template),
-		populateSEO(template.definition.pages, prompt, language, country),
-	]);
+	const final = await Promise.all([populateTheme(prompt), populatePagesWithContent(template)]);
 
-	const [
-		{ theme: generatedTheme, tokens: themeTokens },
-		{ pages, tokens: pagesTokens },
-		{ seoPages, tokens: seoTokens },
-	] = final;
-
+	const [{ theme: generatedTheme, tokens: themeTokens }, { pages, tokens: pagesTokens }] = final;
 	tokensInfo.totalPromptTokens +=
-		themeTokens.totalPromptTokens + pagesTokens.totalPromptTokens + seoTokens.totalPromptTokens;
+		themeTokens.totalPromptTokens +
+		pagesTokens.totalPromptTokens +
+		pagesInfoTokens.totalPromptTokens;
 	tokensInfo.totalCompletionTokens +=
 		themeTokens.totalCompletionTokens +
 		pagesTokens.totalCompletionTokens +
-		seoTokens.totalCompletionTokens;
+		pagesInfoTokens.totalCompletionTokens;
 	tokensInfo.totalTokens +=
-		themeTokens.totalTokens + pagesTokens.totalTokens + seoTokens.totalTokens;
+		themeTokens.totalTokens + pagesTokens.totalTokens + pagesInfoTokens.totalTokens;
 	tokensInfo.totalFalCost += pagesTokens.totalFalCost;
 
 	const globalCss = {

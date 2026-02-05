@@ -106,6 +106,7 @@ export const createSite = async (request, reply) => {
 		return reply.status(201).send({
 			data: {
 				...siteData,
+				url: urlData.publicUrl,
 				previews,
 				siteConfig,
 				siteConfigDetailed,

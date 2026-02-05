@@ -50,24 +50,23 @@ const generateImageWithFal = async (prompt) => {
 				image_size: 'square_hd',
 				num_inference_steps: 4,
 				guidance_scale: 3.5,
-				sync_mode: true
+				sync_mode: true,
 			},
 		});
 
 		const image = data.images[0];
-		const cost = (image.width * image.height / 1000000) * 0.0039;
+		const cost = ((image.width * image.height) / 1000000) * 0.0039;
 
 		return {
 			url: image.url,
 			cost: Number(cost.toFixed(4)),
-			size: `${image.width}x${image.height}`
+			size: `${image.width}x${image.height}`,
 		};
-
 	} catch (error) {
 		return {
 			url: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&format=png`,
 			cost: 0,
-			error: true
+			error: true,
 		};
 	}
 };
@@ -431,17 +430,17 @@ export const buildPageHtml = (page, globalCss, language, country, seo = {}) => {
     <meta name="content-language" content="${language}">
     
     <title>${seo.title || page.title}</title>
-    <meta name="description" content="${seo.description || ''}">
+    <meta name="description" content="${seo.metaDescription || ''}">
     <meta name="keywords" content="${seo.keywords || ''}">
     
     <meta property="og:title" content="${seo.ogTitle || seo.title || page.title}">
-    <meta property="og:description" content="${seo.ogDescription || seo.description || ''}">
+    <meta property="og:description" content="${seo.ogDescription || seo.metaDescription || ''}">
     <meta property="og:type" content="website">
     <meta property="og:locale" content="${language}_${country.toUpperCase()}">
     
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="${seo.ogTitle || seo.title || page.title}">
-    <meta name="twitter:description" content="${seo.ogDescription || seo.description || ''}">
+    <meta name="twitter:description" content="${seo.ogDescription || seo.metaDescription || ''}">
     
     <style>
         :root {
@@ -569,26 +568,37 @@ export const flatPageBlocks = (pages) => {
 };
 
 export const generateAllPagesSeo = async (pages, prompt, language, country) => {
-	const systemPrompt = `Generate SEO attributes for multiple website pages.
+	const systemPrompt = `You are an SEO expert and Web Architect.
+Generate titles, paths, and SEO attributes for website pages based on the user's prompt and page layouts.
 
 Language: ${language}
 Country: ${country}
 Pages: ${pages.map((p) => p.title).join(', ')}
 
-Return JSON array where each object has:
-{
-    "title": "SEO Title (50-60 chars)",
-    "description": "Meta description (150-160 chars)",
-    "keywords": "keyword1, keyword2, keyword3",
-    "ogTitle": "Title for social media",
-    "ogDescription": "Description for social media",
-}
+Rules:
+1. First page MUST have a title that is the equivalent of "Home" in ${language} (e.g., "Головна", "Главная", "Inicio") and path "/".
+2. Paths should be in camelCase (e.g., "About Us" -> "aboutUs").
+3. Titles and SEO must match the website's niche described in the User Prompt.
+4. "ogImage" should be a placeholder: "https://www.companydomain.com/og-image.jpg".
+5. "canonical" should be "https://www.companydomain.com/" + path (ensure no double slashes).
 
-Return format:
+Return JSON format:
 {
     "pages": [
-        { "title": "Page1 SEO", "description": "...", ... },
-        { "title": "Page2 SEO", "description": "...", ... }
+        {
+            "title": "Page Title",
+            "path": "pagePath",
+            "seo": {
+                "title": "SEO Title (50-60 chars)",
+                "metaDescription": "Meta description (150-160 chars)",
+                "keywords": "keyword1, keyword2",
+                "ogTitle": "Social title",
+                "ogDescription": "Social description",
+                "ogImage": "url",
+                "canonical": "url",
+                "robots": "index, follow"
+            }
+        }
     ]
 }`;
 
@@ -608,18 +618,24 @@ Return format:
 
 		const result = JSON.parse(completion.choices[0].message.content);
 
+		console.log(JSON.stringify(result, 2, null));
+
+		const pagesInfo = pages.map((page, index) => {
+			return { pageName: result.pages[index].title, pagePath: result.pages[index].path };
+		});
 		const seoResults = pages.map((page, index) => ({
-			pageTitle: page.title,
-			...(result.pages[index] || {
-				title: page.title,
-				description: `${page.title} services in ${country}`,
-				keywords: `${page.title}, ${country}`,
-				ogTitle: page.title,
-				ogDescription: `${page.title} in ${country}`,
+			pageTitle: result.pages[index].seo.title,
+			...(result.pages[index].seo || {
+				title: result.pages[index].seo.title,
+				description: `${result.pages[index].seo.metaDescription} services in ${country}`,
+				keywords: `${result.pages[index].seo.keywords}, ${country}`,
+				ogTitle: result.pages[index].seo.ogTitle,
+				ogDescription: `${result.pages[index].seo.ogDescription} in ${country}`,
 			}),
 		}));
 
 		return [
+			pagesInfo,
 			seoResults,
 			{
 				totalPromptTokens: completion.usage.prompt_tokens,
@@ -628,12 +644,12 @@ Return format:
 			},
 		];
 	} catch (error) {
-		const fallbackSeo = pages.map((page) => ({
-			title: `${page.title} | ${country}`,
-			description: `${page.title} services in ${country}`,
-			keywords: `${page.title.toLowerCase().replace(/\s+/g, ', ')}, ${country}`,
-			ogTitle: page.title,
-			ogDescription: `${page.title} in ${country}`,
+		const fallbackSeo = pages.map((page, pageIndex) => ({
+			title: `Page ${pageIndex} | ${country}`,
+			description: `Page ${pageIndex} services in ${country}`,
+			keywords: `Page ${pageIndex}, ${country}`,
+			ogTitle: `Page ${pageIndex}`,
+			ogDescription: `Page ${pageIndex} in ${country}`,
 		}));
 
 		return [fallbackSeo, { totalPromptTokens: 0, totalCompletionTokens: 0, totalTokens: 0 }];
