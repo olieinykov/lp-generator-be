@@ -11,7 +11,7 @@ import {
 import { PRICE_FOR_PROMPTS_OPENAI } from '../config/constants.js';
 import dayjs from 'dayjs';
 
-export const generateSite = async ({ currentTokens, template, prompt, country, language }) => {
+export const generateSite = async ({ currentTokens, template, prompt, country, language, zip }) => {
 	const tokensInfo = {
 		totalPromptTokens: currentTokens.totalPromptTokens ?? 0,
 		totalCompletionTokens: currentTokens.totalCompletionTokens ?? 0,
@@ -55,6 +55,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 			prompt,
 			country,
 			language,
+			zip,
 		);
 		preparedGlobalBlocks.forEach((b) => {
 			tokens.totalPromptTokens += b.tokens?.promptTokens ?? 0;
@@ -91,6 +92,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 							country,
 							language,
 							blockDef.pageTitle,
+							zip,
 						);
 						tokens.totalPromptTokens += preparedBlock.tokens.promptTokens;
 						tokens.totalCompletionTokens += preparedBlock.tokens.completionTokens;

@@ -40,18 +40,20 @@ export const createSite = async (request, reply) => {
 			totalFalCost: 0,
 		};
 
+		const zip = new AdmZip();
+
 		const { tokens, siteConfig, sitePages, siteConfigDetailed, previews } = await generateSite({
 			currentTokens,
 			template,
 			prompt,
 			country,
 			language,
+			zip,
 		});
 
 		let tempDomain = 'http://localhost:3000';
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
 
-		const zip = new AdmZip();
 		sitePages.forEach((page) => {
 			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
 		});
