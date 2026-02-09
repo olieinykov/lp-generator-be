@@ -40,7 +40,7 @@ fal.config({
 // 	}
 // };
 
-const generateImageWithFal = async (prompt) => {
+const generateImageWithFal = async (prompt, zip) => {
 	try {
 		const { data } = await fal.run('fal-ai/flux/schnell', {
 			input: {
@@ -55,12 +55,21 @@ const generateImageWithFal = async (prompt) => {
 		});
 
 		const image = data.images[0];
-		const cost = (image.width * image.height / 1000000) * 0.0039;
+		const fileName = `img_${Math.random().toString(36).substring(7)}.png`;
+		const zipPath = `images/${fileName}`;
+
+		const response = await fetch(image.url);
+		const arrayBuffer = await response.arrayBuffer();
+		const buffer = Buffer.from(arrayBuffer);
+
+		zip.addFile(zipPath, buffer);
+
+		const cost = ((image.width * image.height) / 1000000) * 0.0039;
 
 		return {
-			url: image.url,
+			url: zipPath,
 			cost: Number(cost.toFixed(4)),
-			size: `${image.width}x${image.height}`
+			size: `${image.width}x${image.height}`,
 		};
 
 	} catch (error) {
@@ -72,13 +81,13 @@ const generateImageWithFal = async (prompt) => {
 	}
 };
 
-const processImages = async (content, variables) => {
+const processImages = async (content, variables, zip) => {
 	let totalFalCost = 0;
 	for (const [key, value] of Object.entries(content)) {
 		const varDef = variables[key];
 
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
-			const { url, cost } = await generateImageWithFal(value.href);
+			const { url, cost } = await generateImageWithFal(value.href, zip);
 			content[key].href = url;
 			totalFalCost += cost;
 		}
@@ -87,7 +96,7 @@ const processImages = async (content, variables) => {
 			for (const item of value.values) {
 				for (const [itemKey, itemValue] of Object.entries(item)) {
 					if (itemValue?.href && !itemValue.href.startsWith('http')) {
-						const { url, cost } = await generateImageWithFal(itemValue.href);
+						const { url, cost } = await generateImageWithFal(itemValue.href, zip);
 						item[itemKey].href = url;
 						totalFalCost += cost;
 					}
@@ -128,6 +137,7 @@ export const generateBlockContent = async (
 	country,
 	language,
 	templatePages = null,
+	zip,
 ) => {
 	const filteredVariables = Object.entries(variables).filter(([name, v]) => v.type !== 'nav');
 
@@ -247,7 +257,7 @@ Return ONLY valid JSON. All text in ${language}.
 	}
 
 	let result = JSON.parse(jsonMatch[0]);
-	const { totalFalCost, content: updatedContent } = await processImages(result, variables);
+	const { totalFalCost, content: updatedContent } = await processImages(result, variables, zip);
 	result = updatedContent;
 
 	return [
@@ -261,7 +271,7 @@ Return ONLY valid JSON. All text in ${language}.
 	];
 };
 
-export const prepareBlock = async (block, prompt, country, language, navigation = null) => {
+export const prepareBlock = async (block, prompt, country, language, navigation = null, zip) => {
 	try {
 		if (block.hasError) {
 			throw new Error(block.error);
@@ -272,6 +282,8 @@ export const prepareBlock = async (block, prompt, country, language, navigation 
 			prompt,
 			country,
 			language,
+			null,
+			zip
 		);
 
 		console.log('aiContent', aiContent);
@@ -320,6 +332,7 @@ export const prepareGlobalBlocks = async (
 	prompt,
 	country,
 	language,
+	zip,
 ) => {
 	let navigationLabels = null;
 
@@ -339,6 +352,7 @@ export const prepareGlobalBlocks = async (
 					country,
 					language,
 					needsNavLabels ? templatePages : null,
+					zip,
 				);
 
 				if (aiContent.navigationLabels) {

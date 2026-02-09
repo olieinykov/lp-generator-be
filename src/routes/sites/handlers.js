@@ -40,18 +40,20 @@ export const createSite = async (request, reply) => {
 			totalFalCost: 0,
 		};
 
+		const zip = new AdmZip();
 		const { tokens, siteConfig, sitePages, siteConfigDetailed, previews } = await generateSite({
 			currentTokens,
 			template,
 			prompt,
 			country,
 			language,
+			zip,
 		});
 
 		let tempDomain = 'http://localhost:3000';
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
 
-		const zip = new AdmZip();
+		// const zip = new AdmZip();
 		sitePages.forEach((page) => {
 			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
 		});
@@ -366,15 +368,19 @@ export const regenerateSite = async (request, reply) => {
 			return reply.status(404).send({ error: 'Template not found' });
 		}
 
+		const zip = new AdmZip();
 		const { tokens, siteConfig, sitePages, siteConfigDetailed, previews } = await generateSite({
 			currentTokens,
 			template,
 			prompt,
 			country: site.country,
 			language: site.language,
+			zip
 		});
 
-		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl);
+		console.log("Regenearetd tokens", tokens);
+
+		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip);
 
 		const [siteData] = await db
 			.update(sites)
@@ -404,6 +410,7 @@ export const regenerateSite = async (request, reply) => {
 			success: true,
 		});
 	} catch (err) {
+		console.log("err", err)
 		reply.status(500).send({
 			error: err.message,
 			success: false,
@@ -438,6 +445,7 @@ export const regenerateBlock = async (request, reply) => {
 
 		let generatedBlock;
 
+		const zip = new AdmZip();
 		if (isBlockGlobal) {
 			const [preparedBlock] = await prepareGlobalBlocks(
 				[block],
@@ -445,6 +453,7 @@ export const regenerateBlock = async (request, reply) => {
 				site.prompt || prompt,
 				site.country,
 				site.language,
+				zip
 			);
 
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
@@ -458,6 +467,8 @@ export const regenerateBlock = async (request, reply) => {
 				site.prompt || prompt,
 				site.country,
 				site.language,
+				null,
+				zip
 			);
 
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
@@ -498,13 +509,16 @@ export const regenerateBlock = async (request, reply) => {
 			};
 		});
 
+		console.log("site.siteConfigDetailed.seoPages", site.siteConfigDetailed.seoPages)
+
 		const sitePages = buildSitePages(
 			updatedPages,
 			site.siteConfigDetailed.generatedTheme,
 			site.language,
 			site.country,
+			site.siteConfigDetailed.seoPages,
 		);
-		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl);
+		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip);
 
 		const siteConfigDetailed = {
 			pages: sitePages?.map((page) => ({
@@ -514,6 +528,7 @@ export const regenerateBlock = async (request, reply) => {
 				blocks: page.blocks,
 			})),
 			generatedTheme: site.siteConfigDetailed.generatedTheme,
+			seoPages: site.siteConfigDetailed.seoPages,
 		};
 		const inputPrice =
 			tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
@@ -561,6 +576,7 @@ export const regenerateBlock = async (request, reply) => {
 			success: true,
 		});
 	} catch (err) {
+		console.log("error", err);
 		reply.status(500).send({
 			error: err.message,
 			success: false,

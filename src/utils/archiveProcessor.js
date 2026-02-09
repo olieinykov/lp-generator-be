@@ -265,8 +265,7 @@ export default {
 	constants: archiveConstants,
 };
 
-export const replaceSiteZipWithNew = async (sitePages, siteName, existingArchiveUrl) => {
-	const zip = new AdmZip();
+export const replaceSiteZipWithNew = async (sitePages, siteName, existingArchiveUrl, zip) => {
 	sitePages.forEach((page) => {
 		zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
 	});
