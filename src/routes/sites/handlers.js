@@ -12,12 +12,12 @@ import {
 	prepareBlock,
 	prepareGlobalBlocks,
 } from '../../utils/blocks.js';
-import { replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
+import { filteredZip, replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
 import { generateSite, generateSitemapXml } from '../../utils/generator.js';
+import Decimal from 'decimal.js';
 
 function cutNumber(number, amountAfterDot) {
-	const factor = 10 ** amountAfterDot;
-	return Math.floor(number * factor) / factor;
+	return new Decimal(number).toDecimalPlaces(amountAfterDot, Decimal.ROUND_DOWN).toNumber();
 }
 
 export const createSite = async (request, reply) => {
@@ -53,7 +53,6 @@ export const createSite = async (request, reply) => {
 		let tempDomain = 'http://localhost:3000';
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
 
-		// const zip = new AdmZip();
 		sitePages.forEach((page) => {
 			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
 		});
@@ -108,6 +107,7 @@ export const createSite = async (request, reply) => {
 		return reply.status(201).send({
 			data: {
 				...siteData,
+				url: urlData.publicUrl,
 				previews,
 				siteConfig,
 				siteConfigDetailed,
@@ -375,10 +375,10 @@ export const regenerateSite = async (request, reply) => {
 			prompt,
 			country: site.country,
 			language: site.language,
-			zip
+			zip,
 		});
 
-		console.log("Regenearetd tokens", tokens);
+		console.log('Regenearetd tokens', tokens);
 
 		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip);
 
@@ -410,7 +410,7 @@ export const regenerateSite = async (request, reply) => {
 			success: true,
 		});
 	} catch (err) {
-		console.log("err", err)
+		console.log('err', err);
 		reply.status(500).send({
 			error: err.message,
 			success: false,
@@ -444,8 +444,11 @@ export const regenerateBlock = async (request, reply) => {
 		};
 
 		let generatedBlock;
-
-		const zip = new AdmZip();
+		const currentSiteZip = await filteredZip(
+			site.archiveUrl,
+			site.siteConfigDetailed?.pages,
+			generationBlockId,
+		);
 		if (isBlockGlobal) {
 			const [preparedBlock] = await prepareGlobalBlocks(
 				[block],
@@ -453,7 +456,7 @@ export const regenerateBlock = async (request, reply) => {
 				site.prompt || prompt,
 				site.country,
 				site.language,
-				zip
+				currentSiteZip,
 			);
 
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
@@ -468,7 +471,7 @@ export const regenerateBlock = async (request, reply) => {
 				site.country,
 				site.language,
 				null,
-				zip
+				currentSiteZip,
 			);
 
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
@@ -492,13 +495,12 @@ export const regenerateBlock = async (request, reply) => {
 					if (block.generationBlockId !== generationBlockId) {
 						return block;
 					}
-
 					return {
 						id: generatedBlock.id,
 						isGlobal: isBlockGlobal,
 						blockType: generatedBlock.category,
 						blockIndex: blockIndex,
-						// generationBlockId: `${generatedBlock.category}-${blockIndex}`,
+						generationBlockId: generationBlockId,
 						definition: generatedBlock.definition,
 						variables: generatedBlock.variables,
 						hasError: false,
@@ -509,8 +511,6 @@ export const regenerateBlock = async (request, reply) => {
 			};
 		});
 
-		console.log("site.siteConfigDetailed.seoPages", site.siteConfigDetailed.seoPages)
-
 		const sitePages = buildSitePages(
 			updatedPages,
 			site.siteConfigDetailed.generatedTheme,
@@ -518,7 +518,16 @@ export const regenerateBlock = async (request, reply) => {
 			site.country,
 			site.siteConfigDetailed.seoPages,
 		);
-		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip);
+		let tempDomain = 'http://localhost:3000';
+		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
+		const urlData = await replaceSiteZipWithNew(
+			sitePages,
+			site.name,
+			site.archiveUrl,
+			currentSiteZip,
+			siteMapBody,
+			sitemapError,
+		);
 
 		const siteConfigDetailed = {
 			pages: sitePages?.map((page) => ({
@@ -576,7 +585,7 @@ export const regenerateBlock = async (request, reply) => {
 			success: true,
 		});
 	} catch (err) {
-		console.log("error", err);
+		console.log('error', err);
 		reply.status(500).send({
 			error: err.message,
 			success: false,

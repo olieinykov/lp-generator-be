@@ -74,7 +74,14 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 						};
 					} else {
 						const block = await getBlockByType(blockDef.type);
-						const preparedBlock = await prepareBlock(block, prompt, country, language, null, zip);
+						const preparedBlock = await prepareBlock(
+							block,
+							prompt,
+							country,
+							language,
+							null,
+							zip,
+						);
 
 						tokens.totalPromptTokens += preparedBlock.tokens.promptTokens;
 						tokens.totalCompletionTokens += preparedBlock.tokens.completionTokens;
@@ -165,7 +172,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 			blocks: page.blocks,
 		})),
 		seoPages,
-		generatedTheme,
+		generatedTheme: globalCss,
 	};
 
 	return {

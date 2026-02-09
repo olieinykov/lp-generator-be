@@ -50,7 +50,7 @@ const generateImageWithFal = async (prompt, zip) => {
 				image_size: 'square_hd',
 				num_inference_steps: 4,
 				guidance_scale: 3.5,
-				sync_mode: true
+				sync_mode: true,
 			},
 		});
 
@@ -71,12 +71,11 @@ const generateImageWithFal = async (prompt, zip) => {
 			cost: Number(cost.toFixed(4)),
 			size: `${image.width}x${image.height}`,
 		};
-
 	} catch (error) {
 		return {
 			url: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&format=png`,
 			cost: 0,
-			error: true
+			error: true,
 		};
 	}
 };
@@ -283,7 +282,7 @@ export const prepareBlock = async (block, prompt, country, language, navigation 
 			country,
 			language,
 			null,
-			zip
+			zip,
 		);
 
 		console.log('aiContent', aiContent);
