@@ -161,7 +161,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 			filename: page.filename,
 			blocks: page.blocks,
 		})),
-		generatedTheme,
+		generatedTheme: globalCss,
 	};
 
 	return {

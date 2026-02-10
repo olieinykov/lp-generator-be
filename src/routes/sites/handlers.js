@@ -12,12 +12,14 @@ import {
 	prepareBlock,
 	prepareGlobalBlocks,
 } from '../../utils/blocks.js';
-import { replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
+import { filteredZip, replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
 import { generateSite, generateSitemapXml } from '../../utils/generator.js';
+import Decimal from 'decimal.js';
 
 function cutNumber(number, amountAfterDot) {
-	const factor = 10 ** amountAfterDot;
-	return Math.floor(number * factor) / factor;
+	const safeNumber = number ?? 0;
+	const safePrecision = amountAfterDot ?? 0;
+	return new Decimal(safeNumber).toDecimalPlaces(safePrecision, Decimal.ROUND_DOWN).toNumber();
 }
 
 export const createSite = async (request, reply) => {
@@ -357,7 +359,7 @@ export const regenerateSite = async (request, reply) => {
 			totalPromptTokens: site.promptTokens,
 			totalCompletionTokens: site.completionTokens,
 			totalTokens: site.totalTokens,
-			totalFalCost: site.totalFalCost,
+			totalFalCost: site.totalFalPrice,
 		};
 
 		const template = await db.query.templates.findFirst({
@@ -388,7 +390,7 @@ export const regenerateSite = async (request, reply) => {
 			zip.addFile('sitemap.xml', Buffer.from(siteMapBody, 'utf8'));
 		}
 
-		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip);
+		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip, siteMapBody, sitemapError);
 
 		const [siteData] = await db
 			.update(sites)
@@ -399,7 +401,7 @@ export const regenerateSite = async (request, reply) => {
 				completionTokens: tokens.totalCompletionTokens,
 				siteConfigDetailed: siteConfigDetailed,
 				promptTokens: tokens.totalPromptTokens,
-				totalFalPrice: tokens.totalFalPrice,
+				totalFalPrice: tokens.totalFalCost,
 				inputUsdPrice: cutNumber(tokens.openAiInputPrice, 6),
 				outputUsdPrice: cutNumber(tokens.openAiOutputPrice, 6),
 				totalUsdPrice: cutNumber(tokens.openAiTotalPrice, 6),
@@ -448,12 +450,20 @@ export const regenerateBlock = async (request, reply) => {
 			totalPromptTokens: site.promptTokens,
 			totalCompletionTokens: site.completionTokens,
 			totalTokens: site.totalTokens,
-			totalFalCost: site.totalFalCost,
+			totalFalCost: site.totalFalPrice,
 		};
 
 		let generatedBlock;
 
-		const zip = new AdmZip();
+		const regeneratingPage = site.siteConfigDetailed?.pages.find(
+			(page) => page.filename === pageName,
+		);
+		const currentSiteZip = await filteredZip(
+			site.archiveUrl,
+			regeneratingPage,
+			generationBlockId,
+		);
+
 		if (isBlockGlobal) {
 			const [preparedBlock] = await prepareGlobalBlocks(
 				[block],
@@ -461,7 +471,7 @@ export const regenerateBlock = async (request, reply) => {
 				site.prompt || prompt,
 				site.country,
 				site.language,
-				zip
+				currentSiteZip
 			);
 
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
@@ -476,7 +486,7 @@ export const regenerateBlock = async (request, reply) => {
 				site.country,
 				site.language,
 				null,
-				zip
+				currentSiteZip
 			);
 
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
@@ -506,7 +516,7 @@ export const regenerateBlock = async (request, reply) => {
 						isGlobal: isBlockGlobal,
 						blockType: generatedBlock.category,
 						blockIndex: blockIndex,
-						// generationBlockId: `${generatedBlock.category}-${blockIndex}`,
+						generationBlockId: `${generatedBlock.category}-${blockIndex}`,
 						definition: generatedBlock.definition,
 						variables: generatedBlock.variables,
 						hasError: false,
@@ -526,7 +536,9 @@ export const regenerateBlock = async (request, reply) => {
 			site.country,
 			// site.siteConfigDetailed.seoPages,
 		);
-		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip);
+
+		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, site.domain);
+		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, currentSiteZip, siteMapBody, sitemapError);
 
 		const siteConfigDetailed = {
 			pages: sitePages?.map((page) => ({

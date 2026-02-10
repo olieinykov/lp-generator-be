@@ -98,7 +98,6 @@ const processImages = async (content, variables, zip) => {
 	return { content, totalFalCost };
 };
 
-// ==================== БАЗОВЫЕ ОПЕРАЦИИ ====================
 
 export const getBlockByType = async (type) => {
 	const [block] = await db
