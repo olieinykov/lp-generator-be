@@ -2,20 +2,11 @@ import { db } from '../db/connection.js';
 import { blocks } from '../db/schema.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { downloadAndUnzipBlock } from './zipHandler.js';
-import OpenAI from 'openai';
-import { fal } from '@fal-ai/client';
 import * as sass from 'sass';
 import nunjucks from 'nunjucks';
 import fs from 'fs/promises';
 import path from 'path';
-
-const openai = new OpenAI({
-	apiKey: process.env.OPEN_AI_KEY,
-});
-
-fal.config({
-	credentials: process.env.FAL_KEY,
-});
+import {fal, openai} from "../lib/AiClients.js";
 
 // const generateImageWithFal = async (prompt) => {
 // 	try {
@@ -516,9 +507,8 @@ export const buildPageHtml = (page, globalCss, language, country, seo = {}) => {
 </html>`;
 };
 
-export const buildSitePages = (pages, globalCss, language, country, seoPages) => {
+export const buildSitePages = (pages, globalCss, language, country) => {
 	return pages.map((page, pageIndex) => {
-		const seo = seoPages[pageIndex];
 		const pageHasErrors = page?.blocks?.some((block) => block.hasError);
 		const blocks = page?.blocks?.map((block, blockIndex) => {
 			return {
@@ -539,7 +529,7 @@ export const buildSitePages = (pages, globalCss, language, country, seoPages) =>
 			blocks,
 			pageHasErrors,
 			filename: page.path === '/' ? 'index.html' : `${page.path.replace('/', '')}.html`,
-			html: buildPageHtml(page, globalCss, language, country, seo),
+			html: buildPageHtml(page, globalCss, language, country, page.seo),
 		};
 	});
 };
@@ -614,74 +604,3 @@ export const flatPageBlocks = (pages) => {
 	}, []);
 };
 
-export const generateAllPagesSeo = async (pages, prompt, language, country) => {
-	const systemPrompt = `Generate SEO attributes for multiple website pages.
-
-Language: ${language}
-Country: ${country}
-Pages: ${pages.map((p) => p.title).join(', ')}
-
-Return JSON array where each object has:
-{
-    "title": "SEO Title (50-60 chars)",
-    "description": "Meta description (150-160 chars)",
-    "keywords": "keyword1, keyword2, keyword3",
-    "ogTitle": "Title for social media",
-    "ogDescription": "Description for social media",
-}
-
-Return format:
-{
-    "pages": [
-        { "title": "Page1 SEO", "description": "...", ... },
-        { "title": "Page2 SEO", "description": "...", ... }
-    ]
-}`;
-
-	try {
-		const completion = await openai.chat.completions.create({
-			model: 'gpt-5-mini',
-			messages: [
-				{ role: 'system', content: systemPrompt },
-				{
-					role: 'user',
-					content: `Pages: ${pages.map((p) => p.title).join('\n')}\n\nPrompt: ${prompt}`,
-				},
-			],
-			temperature: 1,
-			response_format: { type: 'json_object' },
-		});
-
-		const result = JSON.parse(completion.choices[0].message.content);
-
-		const seoResults = pages.map((page, index) => ({
-			pageTitle: page.title,
-			...(result.pages[index] || {
-				title: page.title,
-				description: `${page.title} services in ${country}`,
-				keywords: `${page.title}, ${country}`,
-				ogTitle: page.title,
-				ogDescription: `${page.title} in ${country}`,
-			}),
-		}));
-
-		return [
-			seoResults,
-			{
-				totalPromptTokens: completion.usage.prompt_tokens,
-				totalCompletionTokens: completion.usage.completion_tokens,
-				totalTokens: completion.usage.total_tokens,
-			},
-		];
-	} catch (error) {
-		const fallbackSeo = pages.map((page) => ({
-			title: `${page.title} | ${country}`,
-			description: `${page.title} services in ${country}`,
-			keywords: `${page.title.toLowerCase().replace(/\s+/g, ', ')}, ${country}`,
-			ogTitle: page.title,
-			ogDescription: `${page.title} in ${country}`,
-		}));
-
-		return [fallbackSeo, { totalPromptTokens: 0, totalCompletionTokens: 0, totalTokens: 0 }];
-	}
-};

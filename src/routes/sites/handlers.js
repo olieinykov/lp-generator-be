@@ -378,7 +378,15 @@ export const regenerateSite = async (request, reply) => {
 			zip
 		});
 
-		console.log("Regenearetd tokens", tokens);
+		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, site.domain);
+
+		sitePages.forEach((page) => {
+			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
+		});
+
+		if (!sitemapError) {
+			zip.addFile('sitemap.xml', Buffer.from(siteMapBody, 'utf8'));
+		}
 
 		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip);
 
@@ -509,14 +517,14 @@ export const regenerateBlock = async (request, reply) => {
 			};
 		});
 
-		console.log("site.siteConfigDetailed.seoPages", site.siteConfigDetailed.seoPages)
+		// console.log("site.siteConfigDetailed.seoPages", site.siteConfigDetailed.seoPages)
 
 		const sitePages = buildSitePages(
 			updatedPages,
 			site.siteConfigDetailed.generatedTheme,
 			site.language,
 			site.country,
-			site.siteConfigDetailed.seoPages,
+			// site.siteConfigDetailed.seoPages,
 		);
 		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip);
 
@@ -528,7 +536,7 @@ export const regenerateBlock = async (request, reply) => {
 				blocks: page.blocks,
 			})),
 			generatedTheme: site.siteConfigDetailed.generatedTheme,
-			seoPages: site.siteConfigDetailed.seoPages,
+			// seoPages: site.siteConfigDetailed.seoPages,
 		};
 		const inputPrice =
 			tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
