@@ -17,7 +17,9 @@ import { generateSite, generateSitemapXml } from '../../utils/generator.js';
 import Decimal from 'decimal.js';
 
 function cutNumber(number, amountAfterDot) {
-	return new Decimal(number).toDecimalPlaces(amountAfterDot, Decimal.ROUND_DOWN).toNumber();
+	const safeNumber = number ?? 0;
+	const safePrecision = amountAfterDot ?? 0;
+	return new Decimal(safeNumber).toDecimalPlaces(safePrecision, Decimal.ROUND_DOWN).toNumber();
 }
 
 export const createSite = async (request, reply) => {
@@ -357,9 +359,8 @@ export const regenerateSite = async (request, reply) => {
 			totalPromptTokens: site.promptTokens,
 			totalCompletionTokens: site.completionTokens,
 			totalTokens: site.totalTokens,
-			totalFalCost: site.totalFalCost,
+			totalFalCost: site.totalFalPrice,
 		};
-
 		const template = await db.query.templates.findFirst({
 			where: eq(templates.id, site.definition),
 		});
@@ -377,8 +378,7 @@ export const regenerateSite = async (request, reply) => {
 			language: site.language,
 			zip,
 		});
-
-		console.log('Regenearetd tokens', tokens);
+		let tempDomain = 'http://localhost:3000';
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
 		const urlData = await replaceSiteZipWithNew(
 			sitePages,
@@ -398,7 +398,7 @@ export const regenerateSite = async (request, reply) => {
 				completionTokens: tokens.totalCompletionTokens,
 				siteConfigDetailed: siteConfigDetailed,
 				promptTokens: tokens.totalPromptTokens,
-				totalFalPrice: tokens.totalFalPrice,
+				totalFalPrice: tokens.totalFalCost,
 				inputUsdPrice: cutNumber(tokens.openAiInputPrice, 6),
 				outputUsdPrice: cutNumber(tokens.openAiOutputPrice, 6),
 				totalUsdPrice: cutNumber(tokens.openAiTotalPrice, 6),
@@ -447,9 +447,8 @@ export const regenerateBlock = async (request, reply) => {
 			totalPromptTokens: site.promptTokens,
 			totalCompletionTokens: site.completionTokens,
 			totalTokens: site.totalTokens,
-			totalFalCost: site.totalFalCost,
+			totalFalCost: site.totalFalPrice,
 		};
-
 		let generatedBlock;
 		const regeneratingPage = site.siteConfigDetailed?.pages.find(
 			(page) => page.filename === pageName,
