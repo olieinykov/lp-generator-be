@@ -41,6 +41,7 @@ export const createSite = async (request, reply) => {
 		};
 
 		const zip = new AdmZip();
+
 		const { tokens, siteConfig, sitePages, siteConfigDetailed, previews } = await generateSite({
 			currentTokens,
 			template,
@@ -107,7 +108,6 @@ export const createSite = async (request, reply) => {
 		return reply.status(201).send({
 			data: {
 				...siteData,
-				url: urlData.publicUrl,
 				previews,
 				siteConfig,
 				siteConfigDetailed,
@@ -379,8 +379,15 @@ export const regenerateSite = async (request, reply) => {
 		});
 
 		console.log('Regenearetd tokens', tokens);
-
-		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip);
+		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
+		const urlData = await replaceSiteZipWithNew(
+			sitePages,
+			site.name,
+			site.archiveUrl,
+			zip,
+			siteMapBody,
+			sitemapError,
+		);
 
 		const [siteData] = await db
 			.update(sites)
@@ -444,9 +451,12 @@ export const regenerateBlock = async (request, reply) => {
 		};
 
 		let generatedBlock;
+		const regeneratingPage = site.siteConfigDetailed?.pages.find(
+			(page) => page.filename === pageName,
+		);
 		const currentSiteZip = await filteredZip(
 			site.archiveUrl,
-			site.siteConfigDetailed?.pages,
+			regeneratingPage,
 			generationBlockId,
 		);
 		if (isBlockGlobal) {

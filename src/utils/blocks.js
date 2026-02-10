@@ -139,7 +139,31 @@ export const generateBlockContent = async (
 	zip,
 ) => {
 	const filteredVariables = Object.entries(variables).filter(([name, v]) => v.type !== 'nav');
+	const arrayKeys = [];
+	Object.keys(variables).forEach((key) => {
+		const variable = variables[key];
 
+		if (variable.type === 'array' && variable.values?.length > 0) {
+			const firstItem = variable.values[0];
+			const fieldSpecs = Object.keys(firstItem).map((fieldName) => {
+				const type = firstItem[fieldName].type || 'text';
+				return { fieldName, type };
+			});
+
+			arrayKeys.push({
+				arrayName: key,
+				fields: fieldSpecs,
+			});
+		}
+	});
+	const arrayRules = arrayKeys
+		.map((arr) => {
+			const fieldsText = arr.fields
+				.map((f) => `- "${f.fieldName}": treat as ${f.type.toUpperCase()}`)
+				.join('\n  ');
+			return `For array "${arr.arrayName}":\n  ${fieldsText}`;
+		})
+		.join('\n');
 	const variablesDescription = filteredVariables
 		.map(([name, v]) => `- ${name} (type: ${v.type})`)
 		.join('\n');
@@ -178,27 +202,19 @@ CONTENT VARIABLES RULES
 1. TEXT VARIABLES: {"variableName": {"value": "text content"}}
 2. IMAGE VARIABLES: {"variableName": {"href": "detailed image description for AI image generation", "alt": "alt text"}}
 3. LINK VARIABLES: {"variableName": {"value": null, "href": "url", "label": "text"}}
-4. ARRAY VARIABLES: 
-   For array variables, fill the "values" array with complete objects.
-   Each object in the array should contain all its nested fields.
 
-   Example for "cards" array with image, title, description:
-   "cards": {
-     "type": "array",
-     "values": [
-       {
-         "image": {"href": "description for image 1", "alt": "alt text 1"},
-         "title": {"value": "Card Title 1"},
-         "description": {"value": "Card description 1"}
-       },
-       {
-         "image": {"href": "description for image 2", "alt": "alt text 2"},
-         "title": {"value": "Card Title 2"},
-         "description": {"value": "Card description 2"}
-       }
-     ]
-   }
+=====================
+ARRAY VARIABLES RULES
+=====================
+- The root must have "type": "array".
+- Every object must be inside "values".
+- FIELD TYPE DEFINITIONS: ${arrayRules}.
 
+[VISUAL GUIDE FOR AI]:
+Input:  "items": { "type": "array", "values": [ { "myField": { "type": "text", "value": "" }, { "myFieldImg": { "type": "image", "href": "", "alt": "" } } ] }
+Output: "items": { "type": "array", "values": [ { "myField": { "value": "Filled Content" }, { "myFieldImg": { "href": "Filled Content", "alt": "Filled content" } } ] }
+(Note: "myField" stayed. Only "type" was removed.)
+	 
 VARIABLES TO FILL:
 ${variablesDescription}
 

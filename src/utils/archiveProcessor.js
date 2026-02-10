@@ -276,11 +276,8 @@ export const replaceSiteZipWithNew = async (
 	const zipEntries = zip.getEntries();
 
 	zipEntries.forEach((entry) => {
-		const isRootHtml =
-			!entry.entryName.includes('/') && entry.entryName.toLowerCase().endsWith('.html');
-
-		const isSitemap = entry.entryName === 'sitemap.xml';
-		if (isRootHtml || isSitemap) {
+		const isImageFolder = entry.entryName.startsWith('images/');
+		if (!isImageFolder) {
 			zip.deleteFile(entry.entryName);
 		}
 	});
@@ -320,21 +317,17 @@ export const replaceSiteZipWithNew = async (
 	return urlData;
 };
 
-export const filteredZip = async (archiveUrl, pages, blockGenerationBlockId) => {
+export const filteredZip = async (archiveUrl, page, blockGenerationBlockId) => {
 	try {
 		const response = await fetch(archiveUrl);
 		if (!response.ok) throw new Error(`Fetch error: ${response.statusText}`);
 
 		const zip = new AdmZip(Buffer.from(await response.arrayBuffer()));
 		let targetBlock = null;
-		for (const page of pages) {
-			targetBlock = page.blocks.find((b) => b.generationBlockId === blockGenerationBlockId);
-			if (targetBlock) break;
-		}
+		targetBlock = page.blocks.find((b) => b.generationBlockId === blockGenerationBlockId);
 
 		if (!targetBlock) {
-			console.log(`No block with id - ${blockGenerationBlockId}.`);
-			return;
+			throw new Error(`No block with id - ${blockGenerationBlockId}.`);
 		}
 
 		const imagePaths = [];
