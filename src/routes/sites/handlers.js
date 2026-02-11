@@ -52,7 +52,6 @@ export const createSite = async (request, reply) => {
 			language,
 			zip,
 		});
-
 		let tempDomain = 'http://localhost:3000';
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
 

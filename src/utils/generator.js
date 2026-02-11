@@ -1,5 +1,6 @@
 import {
 	buildSitePages,
+	fillAnchors,
 	flatPageBlocks,
 	generateAllPagesSeo,
 	generateTheme,
@@ -162,8 +163,8 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 	const openAiOutputPrice =
 		tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
 	const openAiTotalPrice = openAiInputPrice + openAiOutputPrice;
-
-	const sitePages = buildSitePages(pages, globalCss, language, country, seoPages);
+	const updatedPages = fillAnchors(pages);
+	const sitePages = buildSitePages(updatedPages, globalCss, language, country, seoPages);
 	const siteConfigDetailed = {
 		pages: sitePages?.map((page) => ({
 			title: page.title,

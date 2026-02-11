@@ -202,6 +202,7 @@ CONTENT VARIABLES RULES
 1. TEXT VARIABLES: {"variableName": {"value": "text content"}}
 2. IMAGE VARIABLES: {"variableName": {"href": "detailed image description for AI image generation", "alt": "alt text"}}
 3. LINK VARIABLES: {"variableName": {"value": null, "href": "url", "label": "text"}}
+4. ANCHOR VARIABLES: {"variableName": {"href": "", "label": "text"}}
 
 =====================
 ARRAY VARIABLES RULES
@@ -667,4 +668,63 @@ Return format:
 
 		return [fallbackSeo, { totalPromptTokens: 0, totalCompletionTokens: 0, totalTokens: 0 }];
 	}
+};
+
+function getRandomAndRemove(array, currentId) {
+	const filteredArray = array.filter((item) => item.block.id !== currentId);
+	if (filteredArray.length === 0) return { updatedArray: array, selectedItem: null };
+	const randomIndex = Math.floor(Math.random() * filteredArray.length);
+	const selectedItem = filteredArray[randomIndex];
+	const updatedArray = array.filter((item) => item.block.id !== selectedItem.id);
+	return { updatedArray, selectedItem };
+}
+
+export const fillAnchors = (pages) => {
+	return pages.map((page) => {
+		let freeBlocks = page.blocks.map((block, blockIndex) => ({
+			block,
+			blockIndex,
+		}));
+		const allAnchors = [];
+		const updatedBlocks = page.blocks.map((block) => {
+			let newBlock = JSON.parse(JSON.stringify(block));
+
+			if (freeBlocks.length > 1 && newBlock.definition.variables) {
+				Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
+					if (values.type === 'anchor') {
+						let result = getRandomAndRemove(freeBlocks, newBlock.id);
+
+						if (!result.selectedItem) {
+							freeBlocks = page.blocks.map((block, blockIndex) => ({
+								block,
+								blockIndex,
+							}));
+							result = getRandomAndRemove(freeBlocks, newBlock.id);
+						}
+						const href = `#${result.selectedItem.block.category}-${result.selectedItem.blockIndex}`;
+						const label = newBlock.variables[key].label || 'Link';
+
+						newBlock.variables[key].href = href;
+						allAnchors.push({ href, label });
+
+						freeBlocks = result.updatedArray;
+					}
+				});
+			}
+			return newBlock;
+		});
+
+		updatedBlocks.forEach((block) => {
+			Object.entries(block.definition.variables).forEach(([key, val]) => {
+				if (val.type === 'anchors') {
+					block.variables[key].value = allAnchors.map((link) => ({
+						href: link.href,
+						label: link.label,
+					}));
+				}
+			});
+		});
+
+		return { ...page, blocks: updatedBlocks };
+	});
 };
