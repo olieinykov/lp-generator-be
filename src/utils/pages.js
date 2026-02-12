@@ -146,11 +146,21 @@ If these rules are violated, the response is considered INVALID`
         normalizedPages.forEach(pg => console.log("Normalized page:", pg.pagePath, pg.pageTitle));
 
         if (pageCount === 1) {
-            return [{
-                path: "/",
-                title: "Home",
-                seo: normalizedPages[0]?.seo || createFallbackSEO(prompt, language, country, "Home")
-            }];
+
+            return {
+                pages: [{
+                    ...(pages[0] || {}),
+                    path: "/",
+                    title: "Home",
+                    seo: normalizedPages[0]?.seo || createFallbackSEO(prompt, language, country, "Home")
+                }],
+                hasError: false,
+                tokens: {
+                    totalPromptTokens: completion.usage?.prompt_tokens || 0,
+                    totalCompletionTokens: completion.usage?.completion_tokens || 0,
+                    totalTokens: completion.usage?.total_tokens || 0,
+                }
+            };
         }
 
         const populatedPages = normalizedPages.map((item, index) => ({
