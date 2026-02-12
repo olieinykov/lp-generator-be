@@ -68,6 +68,7 @@ const generateImageWithFal = async (prompt, zip) => {
 
 		return {
 			url: zipPath,
+			base64: response.url,
 			cost: Number(cost.toFixed(4)),
 			size: `${image.width}x${image.height}`,
 		};
@@ -86,8 +87,9 @@ const processImages = async (content, variables, zip) => {
 		const varDef = variables[key];
 
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
-			const { url, cost } = await generateImageWithFal(value.href, zip);
+			const { url, base64, cost } = await generateImageWithFal(value.href, zip);
 			content[key].href = url;
+			content[key].href64 = base64;
 			totalFalCost += cost;
 		}
 
@@ -95,8 +97,12 @@ const processImages = async (content, variables, zip) => {
 			for (const item of value.values) {
 				for (const [itemKey, itemValue] of Object.entries(item)) {
 					if (itemValue?.href && !itemValue.href.startsWith('http')) {
-						const { url, cost } = await generateImageWithFal(itemValue.href, zip);
+						const { url, base64, cost } = await generateImageWithFal(
+							itemValue.href,
+							zip,
+						);
 						item[itemKey].href = url;
+						item[itemKey].href64 = base64;
 						totalFalCost += cost;
 					}
 				}
@@ -688,8 +694,7 @@ export const fillAnchors = (pages) => {
 		const allAnchors = [];
 		const updatedBlocks = page.blocks.map((block) => {
 			let newBlock = JSON.parse(JSON.stringify(block));
-
-			if (freeBlocks.length > 1 && newBlock.definition.variables) {
+			if (freeBlocks.length > 1 && !newBlock.hasError) {
 				Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
 					if (values.type === 'anchor') {
 						let result = getRandomAndRemove(freeBlocks, newBlock.id);
