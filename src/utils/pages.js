@@ -82,7 +82,6 @@ If these rules are violated, the response is considered INVALID`
     };
 
     try {
-        console.log("Start")
         const completion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [systemMessage, userMessage],
@@ -96,8 +95,6 @@ If these rules are violated, the response is considered INVALID`
         }
 
         const result = JSON.parse(jsonMatch[0]);
-
-        console.log("AI Response:", result);
 
         const normalizePathAndTitle = (item, index) => {
             let pagePath = item.pagePath || "";
@@ -146,7 +143,6 @@ If these rules are violated, the response is considered INVALID`
         normalizedPages.forEach(pg => console.log("Normalized page:", pg.pagePath, pg.pageTitle));
 
         if (pageCount === 1) {
-
             return {
                 pages: [{
                     ...(pages[0] || {}),
@@ -169,8 +165,6 @@ If these rules are violated, the response is considered INVALID`
             title: item.pageTitle,
             seo: item.seo || createFallbackSEO(prompt, language, country, item.pageTitle),
         }));
-
-        console.log("Final", populatedPages);
 
         return {
             pages: populatedPages,

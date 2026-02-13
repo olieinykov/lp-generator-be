@@ -13,7 +13,7 @@ import {
 	prepareGlobalBlocks,
 } from '../../utils/blocks.js';
 import { filteredZip, replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
-import { generateSite, generateSitemapXml } from '../../utils/generator.js';
+import { generateNginxConfig, generateSite, generateSitemapXml } from '../../utils/generator.js';
 import Decimal from 'decimal.js';
 
 function cutNumber(number, amountAfterDot) {
@@ -54,6 +54,7 @@ export const createSite = async (request, reply) => {
 
 		let tempDomain = 'http://localhost:3000';
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
+		const nginxConfig = generateNginxConfig({ serverName: domain });
 
 		// const zip = new AdmZip();
 		sitePages.forEach((page) => {
@@ -62,6 +63,10 @@ export const createSite = async (request, reply) => {
 
 		if (!sitemapError) {
 			zip.addFile('sitemap.xml', Buffer.from(siteMapBody, 'utf8'));
+		}
+
+		if (nginxConfig) {
+			zip.addFile('nginx.conf', Buffer.from(nginxConfig, 'utf8'));
 		}
 
 		const zipBuffer = zip.toBuffer();
@@ -131,6 +136,9 @@ export const getAllSites = async (request, reply) => {
 			searchById = '',
 			sortBy = 'createdAt',
 			sortOrder = 'desc',
+			trafficSource,
+			country,
+			language,
 			isActive,
 			createdBy,
 			updatedBy,
@@ -160,25 +168,29 @@ export const getAllSites = async (request, reply) => {
 
 		const filters = [];
 
-		if (searchByName) filters.push(ilike(blocks.name, `%${searchByName}%`));
+		if (searchByName) filters.push(ilike(sites.name, `%${searchByName}%`));
 		if (searchById) {
-			filters.push(sql`CAST(${blocks.id} AS TEXT) ILIKE ${'%' + searchById + '%'}`);
+			filters.push(sql`CAST(${sites.id} AS TEXT) ILIKE ${'%' + searchById + '%'}`);
 		}
-		if (createdBy) filters.push(eq(blocks.createdBy, createdBy));
-		if (updatedBy) filters.push(eq(blocks.updatedBy, updatedBy));
+		if (createdBy) filters.push(eq(sites.createdBy, createdBy));
+		if (updatedBy) filters.push(eq(sites.updatedBy, updatedBy));
 
-		if (createdAtFromDate) filters.push(gte(blocks.createdAt, createdAtFromDate));
-		if (createdAtToDate) filters.push(lte(blocks.createdAt, createdAtToDate));
-		if (updatedAtFromDate) filters.push(gte(blocks.updatedAt, updatedAtFromDate));
-		if (updatedAtToDate) filters.push(lte(blocks.updatedAt, updatedAtToDate));
+		if (trafficSource) filters.push(eq(sites.trafficSource, trafficSource));
+		if (country) filters.push(eq(sites.country, country));
+		if (language) filters.push(eq(sites.language, language));
 
-		if (createdByUserId) filters.push(lte(blocks.createdBy, createdByUserId));
-		if (updatedByUserId) filters.push(lte(blocks.updatedBy, updatedByUserId));
+		if (createdAtFromDate) filters.push(gte(sites.createdAt, createdAtFromDate));
+		if (createdAtToDate) filters.push(lte(sites.createdAt, createdAtToDate));
+		if (updatedAtFromDate) filters.push(gte(sites.updatedAt, updatedAtFromDate));
+		if (updatedAtToDate) filters.push(lte(sites.updatedAt, updatedAtToDate));
+
+		if (createdByUserId) filters.push(lte(sites.createdBy, createdByUserId));
+		if (updatedByUserId) filters.push(lte(sites.updatedBy, updatedByUserId));
 
 		if (isActive === 'true') {
-			filters.push(eq(blocks.isActive, true));
+			filters.push(eq(sites.isActive, true));
 		} else if (isActive === 'false') {
-			filters.push(eq(blocks.isActive, false));
+			filters.push(eq(sites.isActive, false));
 		}
 
 		const order = (column) => (sortOrder === 'asc' ? asc(column) : desc(column));
@@ -364,6 +376,7 @@ export const regenerateSite = async (request, reply) => {
 		});
 
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, site.domain);
+		const nginxConfig = generateNginxConfig({ serverName: site.domain });
 
 		sitePages.forEach((page) => {
 			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
@@ -373,7 +386,7 @@ export const regenerateSite = async (request, reply) => {
 			zip.addFile('sitemap.xml', Buffer.from(siteMapBody, 'utf8'));
 		}
 
-		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip, siteMapBody, sitemapError);
+		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip, siteMapBody, sitemapError, nginxConfig);
 
 		const [siteData] = await db
 			.update(sites)
@@ -521,7 +534,10 @@ export const regenerateBlock = async (request, reply) => {
 		);
 
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, site.domain);
-		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, currentSiteZip, siteMapBody, sitemapError);
+
+		const nginxConfig = generateNginxConfig({ serverName: site.domain });
+
+		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, currentSiteZip, siteMapBody, sitemapError, nginxConfig);
 
 		const siteConfigDetailed = {
 			pages: sitePages?.map((page) => ({
