@@ -135,31 +135,7 @@ export const generateBlockContent = async (
 ) => {
 	const variablesDescription = buildVariablesDescription(variables);
 	const expectedShape = buildExpectedShape(variables);
-	const arrayKeys = [];
-	Object.keys(variables).forEach((key) => {
-		const variable = variables[key];
 
-		if (variable.type === 'array' && variable.values?.length > 0) {
-			const firstItem = variable.values[0];
-			const fieldSpecs = Object.keys(firstItem).map((fieldName) => {
-				const type = firstItem[fieldName].type || 'text';
-				return { fieldName, type };
-			});
-
-			arrayKeys.push({
-				arrayName: key,
-				fields: fieldSpecs,
-			});
-		}
-	});
-	const arrayRules = arrayKeys
-		.map((arr) => {
-			const fieldsText = arr.fields
-				.map((f) => `- "${f.fieldName}": treat as ${f.type.toUpperCase()}`)
-				.join('\n  ');
-			return `For array "${arr.arrayName}":\n  ${fieldsText}`;
-		})
-		.join('\n');
 	const navInstruction = templatePages
 		? `
 =====================
@@ -196,10 +172,8 @@ ${variablesDescription}
 Use exactly these variable names and structure. Format:
 - text: {"variableName": {"value": "content"}}
 - image: {"variableName": {"href": "image description for AI", "alt": "alt text"}}
-- link: {"variableName": {"value": null, "href": "url", "label": "text"}}
-- array: 1) The root must have "type": "array".
-		 2) Every object must be inside "values".
-		 3) FIELD TYPE DEFINITIONS: ${arrayRules}.
+- link: {"variableName": {"href": "url", "label": "text"}}
+- array: {"variableName": {"type": "array", "values": [{ ...each key from above list... }, ...]}}
 
 =====================
 EXPECTED SHAPE (fill with real content, 3–5 items for arrays)
@@ -231,8 +205,6 @@ Return ONLY valid JSON. All text in ${language}. No empty strings.
 	}
 
 	let result = JSON.parse(jsonMatch[0]);
-	console.log('RESULT', JSON.stringify(result, 2, null));
-	console.log('VARIABLES', JSON.stringify(variables, 2, null));
 	const { totalFalCost, content: updatedContent } = await processImages(result, variables, zip);
 	result = updatedContent;
 

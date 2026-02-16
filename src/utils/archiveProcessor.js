@@ -76,11 +76,7 @@ function validateField(key, field) {
 			}
 			break;
 		case 'link':
-			if (
-				typeof field.value !== 'string' ||
-				typeof field.href !== 'string' ||
-				typeof field.label !== 'string'
-			) {
+			if (typeof field.href !== 'string' || typeof field.label !== 'string') {
 				throw new Error(`Field "${key}" must have "value", "href" and "label"`);
 			}
 			break;
