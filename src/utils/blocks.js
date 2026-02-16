@@ -6,7 +6,7 @@ import * as sass from 'sass';
 import nunjucks from 'nunjucks';
 import fs from 'fs/promises';
 import path from 'path';
-import {fal, openai} from "../lib/AiClients.js";
+import { fal, openai } from '../lib/AiClients.js';
 
 // const generateImageWithFal = async (prompt) => {
 // 	try {
@@ -41,7 +41,7 @@ const generateImageWithFal = async (prompt, zip) => {
 				image_size: 'square_hd',
 				num_inference_steps: 4,
 				guidance_scale: 3.5,
-				sync_mode: true
+				sync_mode: true,
 			},
 		});
 
@@ -63,12 +63,11 @@ const generateImageWithFal = async (prompt, zip) => {
 			cost: Number(cost.toFixed(4)),
 			size: `${image.width}x${image.height}`,
 		};
-
 	} catch (error) {
 		return {
 			url: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&format=png`,
 			cost: 0,
-			error: true
+			error: true,
 		};
 	}
 };
@@ -89,7 +88,10 @@ const processImages = async (content, variables, zip) => {
 			for (const item of value.values) {
 				for (const [itemKey, itemValue] of Object.entries(item)) {
 					if (itemValue?.href && !itemValue.href.startsWith('http')) {
-						const { url, base64, cost } = await generateImageWithFal(itemValue.href, zip);
+						const { url, base64, cost } = await generateImageWithFal(
+							itemValue.href,
+							zip,
+						);
 						item[itemKey].href = url;
 						item[itemKey].href64 = base64;
 						totalFalCost += cost;
@@ -100,7 +102,6 @@ const processImages = async (content, variables, zip) => {
 	}
 	return { content, totalFalCost };
 };
-
 
 export const getBlockByType = async (type) => {
 	const [block] = await db
@@ -134,7 +135,31 @@ export const generateBlockContent = async (
 ) => {
 	const variablesDescription = buildVariablesDescription(variables);
 	const expectedShape = buildExpectedShape(variables);
+	const arrayKeys = [];
+	Object.keys(variables).forEach((key) => {
+		const variable = variables[key];
 
+		if (variable.type === 'array' && variable.values?.length > 0) {
+			const firstItem = variable.values[0];
+			const fieldSpecs = Object.keys(firstItem).map((fieldName) => {
+				const type = firstItem[fieldName].type || 'text';
+				return { fieldName, type };
+			});
+
+			arrayKeys.push({
+				arrayName: key,
+				fields: fieldSpecs,
+			});
+		}
+	});
+	const arrayRules = arrayKeys
+		.map((arr) => {
+			const fieldsText = arr.fields
+				.map((f) => `- "${f.fieldName}": treat as ${f.type.toUpperCase()}`)
+				.join('\n  ');
+			return `For array "${arr.arrayName}":\n  ${fieldsText}`;
+		})
+		.join('\n');
 	const navInstruction = templatePages
 		? `
 =====================
@@ -172,18 +197,20 @@ Use exactly these variable names and structure. Format:
 - text: {"variableName": {"value": "content"}}
 - image: {"variableName": {"href": "image description for AI", "alt": "alt text"}}
 - link: {"variableName": {"value": null, "href": "url", "label": "text"}}
-- array: {"variableName": {"type": "array", "values": [{ ...each key from above list... }, ...]}}
+- array: 1) The root must have "type": "array".
+		 2) Every object must be inside "values".
+		 3) FIELD TYPE DEFINITIONS: ${arrayRules}.
 
 =====================
 EXPECTED SHAPE (fill with real content, 3–5 items for arrays)
 =====================
 ${expectedShape}
 ${
-		templatePages
-			? `
+	templatePages
+		? `
 If navigation labels were requested above, add to your JSON: "navigationLabels": ["Label 1", "Label 2", ...]`
-			: ''
-	}
+		: ''
+}
 
 Return ONLY valid JSON. All text in ${language}. No empty strings.
 `;
@@ -204,6 +231,8 @@ Return ONLY valid JSON. All text in ${language}. No empty strings.
 	}
 
 	let result = JSON.parse(jsonMatch[0]);
+	console.log('RESULT', JSON.stringify(result, 2, null));
+	console.log('VARIABLES', JSON.stringify(variables, 2, null));
 	const { totalFalCost, content: updatedContent } = await processImages(result, variables, zip);
 	result = updatedContent;
 
@@ -230,7 +259,7 @@ export const prepareBlock = async (block, prompt, country, language, navigation 
 			country,
 			language,
 			null,
-			zip
+			zip,
 		);
 
 		const variables = navigation ? { ...aiContent, navigation } : aiContent;
@@ -307,11 +336,14 @@ export const prepareGlobalBlocks = async (
 
 				const navigation = {
 					type: 'nav',
-					value: templatePages?.length > 1 ? templatePages.map((page, index) => ({
-						href: page.path === '/' ? './index.html' : `.${page.path}.html`,
-						label: navigationLabels?.[index] || page.title,
-						active: false,
-					})) : [],
+					value:
+						templatePages?.length > 1
+							? templatePages.map((page, index) => ({
+									href: page.path === '/' ? './index.html' : `.${page.path}.html`,
+									label: navigationLabels?.[index] || page.title,
+									active: false,
+								}))
+							: [],
 				};
 
 				const variables = { ...aiContent, navigation };
@@ -384,14 +416,37 @@ export const buildPageHtml = (page, globalCss, language, country, seo = {}, isPr
 		.join('\n    ');
 
 	return {
-		html: getHtmlPageTemplate({ seo, page, country, language, blocksCss, blocksHtml, cssVariables }),
-		previewHtml: getHtmlPageTemplate({ seo, page, country, language, blocksCss, blocksHtml: blocksPreviewHtml, cssVariables })
+		html: getHtmlPageTemplate({
+			seo,
+			page,
+			country,
+			language,
+			blocksCss,
+			blocksHtml,
+			cssVariables,
+		}),
+		previewHtml: getHtmlPageTemplate({
+			seo,
+			page,
+			country,
+			language,
+			blocksCss,
+			blocksHtml: blocksPreviewHtml,
+			cssVariables,
+		}),
 	};
 };
 
-const getHtmlPageTemplate = ({ seo, page, country, language, cssVariables, blocksCss, blocksHtml }) => {
-	return (
-		`<!DOCTYPE html>
+const getHtmlPageTemplate = ({
+	seo,
+	page,
+	country,
+	language,
+	cssVariables,
+	blocksCss,
+	blocksHtml,
+}) => {
+	return `<!DOCTYPE html>
 <html lang="${language}">
 <head>
     <meta charset="UTF-8">
@@ -438,9 +493,8 @@ const getHtmlPageTemplate = ({ seo, page, country, language, cssVariables, block
 <body>
     ${blocksHtml}
 </body>
-</html>`
-	)
-}
+</html>`;
+};
 
 export const buildSitePages = (pages, globalCss, language, country) => {
 	return pages.map((page) => {
@@ -546,7 +600,7 @@ const replaceHrefWithHref64 = (value) => {
 	if (!value || typeof value !== 'object') return value;
 
 	if (Array.isArray(value)) {
-		return value.map(item => replaceHrefWithHref64(item));
+		return value.map((item) => replaceHrefWithHref64(item));
 	}
 
 	const newValue = { ...value };
@@ -562,7 +616,7 @@ const replaceHrefWithHref64 = (value) => {
 	}
 
 	return newValue;
-}
+};
 
 function buildVariablesDescription(variables) {
 	const lines = [];
@@ -591,7 +645,8 @@ function buildExpectedShape(variables) {
 				if (typeof field !== 'object' || !field?.type) continue;
 				if (field.type === 'text') item[k] = { value: '...' };
 				else if (field.type === 'image') item[k] = { href: '...', alt: '...' };
-				else if (field.type === 'link') item[k] = { value: null, href: '...', label: '...' };
+				else if (field.type === 'link')
+					item[k] = { value: null, href: '...', label: '...' };
 				else item[k] = { value: '...' };
 			}
 			out[name] = { type: 'array', values: [item, { ...JSON.parse(JSON.stringify(item)) }] };
