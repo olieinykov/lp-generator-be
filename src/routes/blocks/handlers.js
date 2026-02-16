@@ -203,7 +203,7 @@ export const createBlock = async (request, reply) => {
 
 		reply.send({
 			success: true,
-			//data: newBlock,
+			data: newBlock,
 		});
 	} catch (error) {
 		reply.code(400).send({
@@ -321,6 +321,7 @@ export const updateBlock = async (request, reply) => {
 		const archiveBuffer = fileData._buf || (await fileData.toBuffer());
 
 		archiveProcessor.validateArchive(archiveBuffer, fileData.mimetype, fileData.filename);
+		const archiveResult = await archiveProcessor.extractAndValidate(archiveBuffer);
 
 		const newDefinition = {
 			originalArchive: fileData.filename,
