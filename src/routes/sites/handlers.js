@@ -269,7 +269,6 @@ export const getOneSite = async (request, reply) => {
 			site.country,
 		);
 
-
 		reply.send({
 			success: true,
 			data: {
@@ -371,7 +370,7 @@ export const regenerateSite = async (request, reply) => {
 			prompt,
 			country: site.country,
 			language: site.language,
-			zip
+			zip,
 		});
 
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, site.domain);
@@ -385,7 +384,15 @@ export const regenerateSite = async (request, reply) => {
 			zip.addFile('sitemap.xml', Buffer.from(siteMapBody, 'utf8'));
 		}
 
-		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, zip, siteMapBody, sitemapError, nginxConfig);
+		const urlData = await replaceSiteZipWithNew(
+			sitePages,
+			site.name,
+			site.archiveUrl,
+			zip,
+			siteMapBody,
+			sitemapError,
+			nginxConfig,
+		);
 
 		const [siteData] = await db
 			.update(sites)
@@ -415,7 +422,7 @@ export const regenerateSite = async (request, reply) => {
 			success: true,
 		});
 	} catch (err) {
-		console.log("err", err)
+		console.log('err', err);
 		reply.status(500).send({
 			error: err.message,
 			success: false,
@@ -466,7 +473,7 @@ export const regenerateBlock = async (request, reply) => {
 				site.prompt || prompt,
 				site.country,
 				site.language,
-				currentSiteZip
+				currentSiteZip,
 			);
 
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
@@ -481,7 +488,7 @@ export const regenerateBlock = async (request, reply) => {
 				site.country,
 				site.language,
 				null,
-				currentSiteZip
+				currentSiteZip,
 			);
 
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
@@ -503,7 +510,8 @@ export const regenerateBlock = async (request, reply) => {
 				...page,
 				blocks: page.blocks.map((block, blockIndex) => {
 					const generationBlockMatch = block.generationBlockId === generationBlockId;
-					const globalTypeMatch = isBlockGlobal && block.blockType === generatedBlock.category;
+					const globalTypeMatch =
+						isBlockGlobal && block.blockType === generatedBlock.category;
 					if (generationBlockMatch || globalTypeMatch) {
 						return {
 							id: generatedBlock.id,
@@ -538,7 +546,15 @@ export const regenerateBlock = async (request, reply) => {
 
 		const nginxConfig = generateNginxConfig({ serverName: site.domain });
 
-		const urlData = await replaceSiteZipWithNew(sitePages, site.name, site.archiveUrl, currentSiteZip, siteMapBody, sitemapError, nginxConfig);
+		const urlData = await replaceSiteZipWithNew(
+			sitePages,
+			site.name,
+			site.archiveUrl,
+			currentSiteZip,
+			siteMapBody,
+			sitemapError,
+			nginxConfig,
+		);
 
 		const siteConfigDetailed = {
 			pages: sitePages?.map((page) => ({
@@ -596,7 +612,7 @@ export const regenerateBlock = async (request, reply) => {
 			success: true,
 		});
 	} catch (err) {
-		console.log("error", err);
+		console.log('error', err);
 		reply.status(500).send({
 			error: err.message,
 			success: false,
