@@ -8,29 +8,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fal, openai } from '../lib/AiClients.js';
 
-// const generateImageWithFal = async (prompt) => {
-// 	try {
-// 		const result = await fal.subscribe('fal-ai/flux/schnell', {
-// 			input: {
-// 				prompt: prompt,
-// 				image_size: 'landscape_16_9',
-// 				num_inference_steps: 4,
-// 				num_images: 1,
-// 			},
-// 		});
-// 		const image = result.images[0];
-// 		const megapixels = (image.width * image.height) / 1000000;
-// 		const cost = megapixels * PRICE_FOR_PROMPTS_FALAI.perMegaPixel;
-//
-// 		return { url: image.url, cost: cost };
-// 	} catch (error) {
-// 		return {
-// 			url: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=600`,
-// 			cost: 0,
-// 		};
-// 	}
-// };
-
 const generateImageWithFal = async (prompt, zip) => {
 	try {
 		const { data } = await fal.run('fal-ai/flux/schnell', {
@@ -172,7 +149,7 @@ ${variablesDescription}
 Use exactly these variable names and structure. Format:
 - text: {"variableName": {"value": "content"}}
 - image: {"variableName": {"href": "image description for AI", "alt": "alt text"}}
-- link: {"variableName": {"value": null, "href": "url", "label": "text"}}
+- link: {"variableName": {"href": "url", "label": "text"}}
 - array: {"variableName": {"type": "array", "values": [{ ...each key from above list... }, ...]}}
 
 =====================
@@ -632,3 +609,92 @@ function buildExpectedShape(variables) {
 	}
 	return JSON.stringify(out, null, 2);
 }
+
+
+const getRandomAndRemove = (array, currentId, currentBlockIndex) => {
+	const filteredArray = array.filter(
+		(item) => item.block.id !== currentId || item.blockIndex !== currentBlockIndex,
+	);
+
+	if (filteredArray.length === 0) return { updatedArray: array, selectedItem: null };
+	const randomIndex = Math.floor(Math.random() * filteredArray.length);
+	const selectedItem = filteredArray[randomIndex];
+	const updatedArray = array.filter((item) => !(
+		item.block.id === selectedItem.block.id && item.blockIndex === selectedItem.blockIndex
+	));
+	return { updatedArray, selectedItem };
+}
+
+export const fillAnchors = (pages, targetPage = '') => {
+	return pages.map((page) => {
+		if (targetPage && page.filename !== targetPage) {
+			return page;
+		}
+
+		let freeBlocks = page.blocks
+			.map((block, blockIndex) => ({
+				block,
+				blockIndex,
+			}))
+			.filter(
+				(blockInfo) =>
+					blockInfo.block.category !== 'header' && blockInfo.block.category !== 'footer',
+			);
+		const startBlocksLength = freeBlocks.length;
+		// const allAnchors = new Map();
+		const updatedBlocks = page.blocks.map((block, blockIndexGlobal) => {
+			let newBlock = JSON.parse(JSON.stringify(block));
+
+			if (startBlocksLength > 1 && newBlock.definition.variables) {
+				Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
+					if (values.type === 'anchor') {
+						let result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
+						// if (!result.selectedItem) {
+						// 	freeBlocks = page.blocks
+						// 		.map((block, blockIndex) => ({
+						// 			block,
+						// 			blockIndex,
+						// 		}))
+						// 		.filter(
+						// 			(blockInfo) =>
+						// 				blockInfo.block.category !== 'header' &&
+						// 				blockInfo.block.category !== 'footer',
+						// 		);
+						// 	result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
+						// }
+						const href = `#${result.selectedItem.block.category}-${result.selectedItem.blockIndex}`;
+						// const label = newBlock.variables[key].label || 'Link';
+						newBlock.variables[key].href = href;
+						// allAnchors.set(href, label);
+						freeBlocks = result.updatedArray;
+					}
+				});
+			} else {
+				Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
+					if (values.type === 'anchor') {
+						const href = '#';
+						const label = '';
+						newBlock.variables[key].href = href;
+						newBlock.variables[key].label = label;
+					}
+				});
+			}
+			return newBlock;
+		});
+		// const uniqueAnchorsList = Array.from(allAnchors.entries()).map(([href, label]) => ({
+		// 	href,
+		// 	label,
+		// }));
+
+		//TODO:
+		// updatedBlocks.forEach((block) => {
+		// 	Object.entries(block.definition.variables).forEach(([key, val]) => {
+		// 		if (val.type === 'anchors') {
+		// 			block.variables[key].value = uniqueAnchorsList;
+		// 		}
+		// 	});
+		// });
+
+		return { ...page, blocks: updatedBlocks };
+	});
+};

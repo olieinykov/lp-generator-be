@@ -7,6 +7,7 @@ import { PRICE_FOR_PROMPTS_OPENAI } from '../../config/constants.js';
 import slugify from 'slugify';
 import {
 	buildSitePages,
+	fillAnchors,
 	getBlockByType,
 	prepareBlock,
 	prepareGlobalBlocks,
@@ -532,10 +533,10 @@ export const regenerateBlock = async (request, reply) => {
 			};
 		});
 
-		// console.log("site.siteConfigDetailed.seoPages", site.siteConfigDetailed.seoPages)
+		const updatedPagesWithAnchor = fillAnchors(updatedPages);
 
 		const sitePages = buildSitePages(
-			updatedPages,
+			updatedPagesWithAnchor,
 			site.siteConfigDetailed.generatedTheme,
 			site.language,
 			site.country,
