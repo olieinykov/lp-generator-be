@@ -535,7 +535,7 @@ export const regenerateBlock = async (request, reply) => {
 				}),
 			};
 		});
-		const updatedPagesWithAnchor = fillAnchors(updatedPages);
+		const updatedPagesWithAnchor = fillAnchors(updatedPages, isBlockGlobal ? '' : pageName);
 		// console.log("site.siteConfigDetailed.seoPages", site.siteConfigDetailed.seoPages)
 
 		const sitePages = buildSitePages(

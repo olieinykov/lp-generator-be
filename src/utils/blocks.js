@@ -59,7 +59,7 @@ const generateImageWithFal = async (prompt, zip) => {
 
 		return {
 			url: zipPath,
-			base64: response.url,
+			//base64: response.url,
 			cost: Number(cost.toFixed(4)),
 			size: `${image.width}x${image.height}`,
 		};
@@ -80,7 +80,7 @@ const processImages = async (content, variables, zip) => {
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
 			const { url, base64, cost } = await generateImageWithFal(value.href, zip);
 			content[key].href = url;
-			content[key].href64 = base64;
+			//content[key].href64 = base64;
 			totalFalCost += cost;
 		}
 
@@ -93,7 +93,7 @@ const processImages = async (content, variables, zip) => {
 							zip,
 						);
 						item[itemKey].href = url;
-						item[itemKey].href64 = base64;
+						//item[itemKey].href64 = base64;
 						totalFalCost += cost;
 					}
 				}
@@ -653,8 +653,11 @@ function getRandomAndRemove(array, currentId, currentBlockIndex) {
 	return { updatedArray, selectedItem };
 }
 
-export const fillAnchors = (pages) => {
+export const fillAnchors = (pages, targetPage = '') => {
 	return pages.map((page) => {
+		if (targetPage && page.filename !== targetPage) {
+			return page;
+		}
 		let freeBlocks = page.blocks
 			.map((block, blockIndex) => ({
 				block,
@@ -709,7 +712,6 @@ export const fillAnchors = (pages) => {
 			href,
 			label,
 		}));
-
 		updatedBlocks.forEach((block) => {
 			Object.entries(block.definition.variables).forEach(([key, val]) => {
 				if (val.type === 'anchors') {
