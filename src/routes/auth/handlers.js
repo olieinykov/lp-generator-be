@@ -4,7 +4,6 @@ import { profiles } from '../../db/schema.js';
 export const registerNewUser = async (request, reply) => {
 	try {
 		const { email, password, username } = request.body;
-
 		const { data, error } = await supabase.auth.admin.createUser({
 			email,
 			password,
@@ -28,12 +27,7 @@ export const registerNewUser = async (request, reply) => {
 
 		return reply.status(201).send({
 			success: true,
-			data: {
-				id: user.id,
-				email: user.email,
-				username,
-				createdAt: new Date().toISOString(),
-			},
+			data: { id: user.id, email: user.email, username, createdAt: new Date().toISOString() },
 		});
 	} catch (error) {
 		console.error('Register error:', error);
