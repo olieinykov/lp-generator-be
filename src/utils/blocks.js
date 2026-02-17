@@ -172,7 +172,7 @@ ${variablesDescription}
 Use exactly these variable names and structure. Format:
 - text: {"variableName": {"value": "content"}}
 - image: {"variableName": {"href": "image description for AI", "alt": "alt text"}}
-- link: {"variableName": {"value": null, "href": "url", "label": "text"}}
+- link: {"variableName": {"href": "url", "label": "text"}}
 - array: {"variableName": {"type": "array", "values": [{ ...each key from above list... }, ...]}}
 
 =====================

@@ -53,7 +53,7 @@ You MUST ALWAYS return a SINGLE JSON OBJECT with the following exact structure:
   "pages": [
     {
       "pagePath": "string starting with /",
-      "pageTitle": "Human readable english title of the page",
+      "pageTitle": "Human readable english title of the page in ${language}",
       "seo": {
         "title": "50-60 characters in ${language}",
         "description": "150-160 characters in ${language}",
