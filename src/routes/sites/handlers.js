@@ -8,12 +8,13 @@ import { PRICE_FOR_PROMPTS_OPENAI } from '../../config/constants.js';
 import slugify from 'slugify';
 import {
 	buildSitePages,
+	fillAnchors,
 	getBlockByType,
 	prepareBlock,
 	prepareGlobalBlocks,
 } from '../../utils/blocks.js';
 import { filteredZip, replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
-import { generateSite, generateSitemapXml } from '../../utils/generator.js';
+import { generateNginxConfig, generateSite, generateSitemapXml } from '../../utils/generator.js';
 import Decimal from 'decimal.js';
 
 function cutNumber(number, amountAfterDot) {
@@ -43,7 +44,6 @@ export const createSite = async (request, reply) => {
 		};
 
 		const zip = new AdmZip();
-
 		const { tokens, siteConfig, sitePages, siteConfigDetailed, previews } = await generateSite({
 			currentTokens,
 			template,
@@ -52,15 +52,22 @@ export const createSite = async (request, reply) => {
 			language,
 			zip,
 		});
+
 		let tempDomain = 'http://localhost:3000';
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
+		const nginxConfig = generateNginxConfig({ serverName: domain });
 
+		// const zip = new AdmZip();
 		sitePages.forEach((page) => {
 			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
 		});
 
 		if (!sitemapError) {
 			zip.addFile('sitemap.xml', Buffer.from(siteMapBody, 'utf8'));
+		}
+
+		if (nginxConfig) {
+			zip.addFile('nginx.conf', Buffer.from(nginxConfig, 'utf8'));
 		}
 
 		const zipBuffer = zip.toBuffer();
@@ -130,6 +137,9 @@ export const getAllSites = async (request, reply) => {
 			searchById = '',
 			sortBy = 'createdAt',
 			sortOrder = 'desc',
+			trafficSource,
+			country,
+			language,
 			isActive,
 			createdBy,
 			updatedBy,
@@ -159,25 +169,29 @@ export const getAllSites = async (request, reply) => {
 
 		const filters = [];
 
-		if (searchByName) filters.push(ilike(blocks.name, `%${searchByName}%`));
+		if (searchByName) filters.push(ilike(sites.name, `%${searchByName}%`));
 		if (searchById) {
-			filters.push(sql`CAST(${blocks.id} AS TEXT) ILIKE ${'%' + searchById + '%'}`);
+			filters.push(sql`CAST(${sites.id} AS TEXT) ILIKE ${'%' + searchById + '%'}`);
 		}
-		if (createdBy) filters.push(eq(blocks.createdBy, createdBy));
-		if (updatedBy) filters.push(eq(blocks.updatedBy, updatedBy));
+		if (createdBy) filters.push(eq(sites.createdBy, createdBy));
+		if (updatedBy) filters.push(eq(sites.updatedBy, updatedBy));
 
-		if (createdAtFromDate) filters.push(gte(blocks.createdAt, createdAtFromDate));
-		if (createdAtToDate) filters.push(lte(blocks.createdAt, createdAtToDate));
-		if (updatedAtFromDate) filters.push(gte(blocks.updatedAt, updatedAtFromDate));
-		if (updatedAtToDate) filters.push(lte(blocks.updatedAt, updatedAtToDate));
+		if (trafficSource) filters.push(eq(sites.trafficSource, trafficSource));
+		if (country) filters.push(eq(sites.country, country));
+		if (language) filters.push(eq(sites.language, language));
 
-		if (createdByUserId) filters.push(lte(blocks.createdBy, createdByUserId));
-		if (updatedByUserId) filters.push(lte(blocks.updatedBy, updatedByUserId));
+		if (createdAtFromDate) filters.push(gte(sites.createdAt, createdAtFromDate));
+		if (createdAtToDate) filters.push(lte(sites.createdAt, createdAtToDate));
+		if (updatedAtFromDate) filters.push(gte(sites.updatedAt, updatedAtFromDate));
+		if (updatedAtToDate) filters.push(lte(sites.updatedAt, updatedAtToDate));
+
+		if (createdByUserId) filters.push(lte(sites.createdBy, createdByUserId));
+		if (updatedByUserId) filters.push(lte(sites.updatedBy, updatedByUserId));
 
 		if (isActive === 'true') {
-			filters.push(eq(blocks.isActive, true));
+			filters.push(eq(sites.isActive, true));
 		} else if (isActive === 'false') {
-			filters.push(eq(blocks.isActive, false));
+			filters.push(eq(sites.isActive, false));
 		}
 
 		const order = (column) => (sortOrder === 'asc' ? asc(column) : desc(column));
@@ -250,40 +264,22 @@ export const getOneSite = async (request, reply) => {
 			.from(sites)
 			.where(eq(sites.id, parseInt(siteId)));
 
-		const response = await fetch(site.archiveUrl);
-		if (!response.ok) {
-			throw new Error(`Failed to download archive: ${response.status}`);
-		}
-
-		const responseArrayBuffer = await response.arrayBuffer();
-		const zip = await JSZip.loadAsync(responseArrayBuffer);
-
-		const htmlFiles = Object.keys(zip.files).filter((filename) =>
-			filename.toLowerCase().endsWith('.html'),
-		);
-
-		const previews = await Promise.all(
-			htmlFiles.map(async (filename) => {
-				try {
-					const html = await zip.file(filename).async('string');
-					return {
-						filename,
-						html,
-					};
-				} catch (error) {
-					return {
-						filename,
-						html: null,
-					};
-				}
-			}),
+		const sitePages = buildSitePages(
+			site.siteConfigDetailed.pages,
+			site.siteConfigDetailed.generatedTheme,
+			site.language,
+			site.country,
 		);
 
 		reply.send({
 			success: true,
 			data: {
 				...site,
-				previews,
+				previews: sitePages.map((page) => ({
+					html: page.previewHtml,
+					filename: page.filename,
+					hasErrors: page.pageHasErrors,
+				})),
 				siteConfig: site?.siteConfigDetailed?.pages?.map((page) => ({
 					...page,
 					blocks: page?.blocks?.map((block) => ({
@@ -360,6 +356,7 @@ export const regenerateSite = async (request, reply) => {
 			totalTokens: site.totalTokens,
 			totalFalCost: site.totalFalPrice,
 		};
+
 		const template = await db.query.templates.findFirst({
 			where: eq(templates.id, site.definition),
 		});
@@ -377,8 +374,18 @@ export const regenerateSite = async (request, reply) => {
 			language: site.language,
 			zip,
 		});
-		let tempDomain = 'http://localhost:3000';
-		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
+
+		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, site.domain);
+		const nginxConfig = generateNginxConfig({ serverName: site.domain });
+
+		sitePages.forEach((page) => {
+			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
+		});
+
+		if (!sitemapError) {
+			zip.addFile('sitemap.xml', Buffer.from(siteMapBody, 'utf8'));
+		}
+
 		const urlData = await replaceSiteZipWithNew(
 			sitePages,
 			site.name,
@@ -386,6 +393,7 @@ export const regenerateSite = async (request, reply) => {
 			zip,
 			siteMapBody,
 			sitemapError,
+			nginxConfig,
 		);
 
 		const [siteData] = await db
@@ -448,7 +456,9 @@ export const regenerateBlock = async (request, reply) => {
 			totalTokens: site.totalTokens,
 			totalFalCost: site.totalFalPrice,
 		};
+
 		let generatedBlock;
+
 		const regeneratingPage = site.siteConfigDetailed?.pages.find(
 			(page) => page.filename === pageName,
 		);
@@ -457,6 +467,7 @@ export const regenerateBlock = async (request, reply) => {
 			regeneratingPage,
 			generationBlockId,
 		);
+
 		if (isBlockGlobal) {
 			const [preparedBlock] = await prepareGlobalBlocks(
 				[block],
@@ -501,14 +512,20 @@ export const regenerateBlock = async (request, reply) => {
 				...page,
 				blocks: page.blocks.map((block, blockIndex) => {
 					if (block.generationBlockId !== generationBlockId) {
-						return block;
+						return {
+							...block,
+							id: block.blockId,
+							category: block.blockType,
+						};
 					}
+
 					return {
 						id: generatedBlock.id,
 						isGlobal: isBlockGlobal,
 						blockType: generatedBlock.category,
+						category: generatedBlock.category,
 						blockIndex: blockIndex,
-						generationBlockId: generationBlockId,
+						generationBlockId: `${generatedBlock.category}-${blockIndex}`,
 						definition: generatedBlock.definition,
 						variables: generatedBlock.variables,
 						hasError: false,
@@ -518,16 +535,21 @@ export const regenerateBlock = async (request, reply) => {
 				}),
 			};
 		});
+		const updatedPagesWithAnchor = fillAnchors(updatedPages);
+		// console.log("site.siteConfigDetailed.seoPages", site.siteConfigDetailed.seoPages)
 
 		const sitePages = buildSitePages(
-			updatedPages,
+			updatedPagesWithAnchor,
 			site.siteConfigDetailed.generatedTheme,
 			site.language,
 			site.country,
-			site.siteConfigDetailed.seoPages,
+			// site.siteConfigDetailed.seoPages,
 		);
-		let tempDomain = 'http://localhost:3000';
-		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, tempDomain);
+
+		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, site.domain);
+
+		const nginxConfig = generateNginxConfig({ serverName: site.domain });
+
 		const urlData = await replaceSiteZipWithNew(
 			sitePages,
 			site.name,
@@ -535,6 +557,7 @@ export const regenerateBlock = async (request, reply) => {
 			currentSiteZip,
 			siteMapBody,
 			sitemapError,
+			nginxConfig,
 		);
 
 		const siteConfigDetailed = {
@@ -545,7 +568,7 @@ export const regenerateBlock = async (request, reply) => {
 				blocks: page.blocks,
 			})),
 			generatedTheme: site.siteConfigDetailed.generatedTheme,
-			seoPages: site.siteConfigDetailed.seoPages,
+			// seoPages: site.siteConfigDetailed.seoPages,
 		};
 		const inputPrice =
 			tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
@@ -574,7 +597,7 @@ export const regenerateBlock = async (request, reply) => {
 			data: {
 				...siteData,
 				previews: sitePages.map((page) => ({
-					html: page.html,
+					html: page.previewHtml,
 					filename: page.filename,
 					hasErrors: page.pageHasErrors,
 				})),

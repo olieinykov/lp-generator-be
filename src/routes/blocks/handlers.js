@@ -138,7 +138,6 @@ export const createBlock = async (request, reply) => {
 
 		archiveProcessor.validateArchive(archiveBuffer, fileData.mimetype, fileData.filename);
 		const archiveResult = await archiveProcessor.extractAndValidate(archiveBuffer);
-
 		const archiveFilename = archiveProcessor.generateArchiveName(fileData.filename);
 
 		const { data: uploadData, error: uploadError } = await supabase.storage
@@ -322,6 +321,7 @@ export const updateBlock = async (request, reply) => {
 		const archiveBuffer = fileData._buf || (await fileData.toBuffer());
 
 		archiveProcessor.validateArchive(archiveBuffer, fileData.mimetype, fileData.filename);
+		const archiveResult = await archiveProcessor.extractAndValidate(archiveBuffer);
 
 		const newDefinition = {
 			originalArchive: fileData.filename,

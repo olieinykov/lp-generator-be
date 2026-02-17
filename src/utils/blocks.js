@@ -2,20 +2,11 @@ import { db } from '../db/connection.js';
 import { blocks } from '../db/schema.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { downloadAndUnzipBlock } from './zipHandler.js';
-import OpenAI from 'openai';
-import { fal } from '@fal-ai/client';
 import * as sass from 'sass';
 import nunjucks from 'nunjucks';
 import fs from 'fs/promises';
 import path from 'path';
-
-const openai = new OpenAI({
-	apiKey: process.env.OPEN_AI_KEY,
-});
-
-fal.config({
-	credentials: process.env.FAL_KEY,
-});
+import { fal, openai } from '../lib/AiClients.js';
 
 // const generateImageWithFal = async (prompt) => {
 // 	try {
@@ -68,7 +59,7 @@ const generateImageWithFal = async (prompt, zip) => {
 
 		return {
 			url: zipPath,
-			base64: response.url,
+			//base64: response.url,
 			cost: Number(cost.toFixed(4)),
 			size: `${image.width}x${image.height}`,
 		};
@@ -89,7 +80,7 @@ const processImages = async (content, variables, zip) => {
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
 			const { url, base64, cost } = await generateImageWithFal(value.href, zip);
 			content[key].href = url;
-			content[key].href64 = base64;
+			//content[key].href64 = base64;
 			totalFalCost += cost;
 		}
 
@@ -102,7 +93,7 @@ const processImages = async (content, variables, zip) => {
 							zip,
 						);
 						item[itemKey].href = url;
-						item[itemKey].href64 = base64;
+						//item[itemKey].href64 = base64;
 						totalFalCost += cost;
 					}
 				}
@@ -111,8 +102,6 @@ const processImages = async (content, variables, zip) => {
 	}
 	return { content, totalFalCost };
 };
-
-// ==================== БАЗОВЫЕ ОПЕРАЦИИ ====================
 
 export const getBlockByType = async (type) => {
 	const [block] = await db
@@ -144,35 +133,8 @@ export const generateBlockContent = async (
 	templatePages = null,
 	zip,
 ) => {
-	const filteredVariables = Object.entries(variables).filter(([name, v]) => v.type !== 'nav');
-	const arrayKeys = [];
-	Object.keys(variables).forEach((key) => {
-		const variable = variables[key];
-
-		if (variable.type === 'array' && variable.values?.length > 0) {
-			const firstItem = variable.values[0];
-			const fieldSpecs = Object.keys(firstItem).map((fieldName) => {
-				const type = firstItem[fieldName].type || 'text';
-				return { fieldName, type };
-			});
-
-			arrayKeys.push({
-				arrayName: key,
-				fields: fieldSpecs,
-			});
-		}
-	});
-	const arrayRules = arrayKeys
-		.map((arr) => {
-			const fieldsText = arr.fields
-				.map((f) => `- "${f.fieldName}": treat as ${f.type.toUpperCase()}`)
-				.join('\n  ');
-			return `For array "${arr.arrayName}":\n  ${fieldsText}`;
-		})
-		.join('\n');
-	const variablesDescription = filteredVariables
-		.map(([name, v]) => `- ${name} (type: ${v.type})`)
-		.join('\n');
+	const variablesDescription = buildVariablesDescription(variables);
+	const expectedShape = buildExpectedShape(variables);
 
 	const navInstruction = templatePages
 		? `
@@ -203,64 +165,29 @@ Your task:
 
 ${navInstruction}
 =====================
-CONTENT VARIABLES RULES
+STRUCTURE TO FILL (from this block's definition)
 =====================
-1. TEXT VARIABLES: {"variableName": {"value": "text content"}}
-2. IMAGE VARIABLES: {"variableName": {"href": "detailed image description for AI image generation", "alt": "alt text"}}
-3. LINK VARIABLES: {"variableName": {"value": null, "href": "url", "label": "text"}}
-4. ANCHOR VARIABLES: {"variableName": {"href": "", "label": "text"}}
-
-=====================
-ARRAY VARIABLES RULES
-=====================
-- The root must have "type": "array".
-- Every object must be inside "values".
-- FIELD TYPE DEFINITIONS: ${arrayRules}.
-
-[VISUAL GUIDE FOR AI]:
-Input:  "items": { "type": "array", "values": [ { "myField": { "type": "text", "value": "" }, { "myFieldImg": { "type": "image", "href": "", "alt": "" } } ] }
-Output: "items": { "type": "array", "values": [ { "myField": { "value": "Filled Content" }, { "myFieldImg": { "href": "Filled Content", "alt": "Filled content" } } ] }
-(Note: "myField" stayed. Only "type" was removed.)
-	 
-VARIABLES TO FILL:
 ${variablesDescription}
 
-=====================
-OUTPUT FORMAT
-=====================
-Return a FLAT JSON object where each key is the variable name.
+Use exactly these variable names and structure. Format:
+- text: {"variableName": {"value": "content"}}
+- image: {"variableName": {"href": "image description for AI", "alt": "alt text"}}
+- link: {"variableName": {"href": "url", "label": "text"}}
+- anchor: {"variableName": {"href": "url", "label": "text"}}
+- array: {"variableName": {"type": "array", "values": [{ ...each key from above list... }, ...]}}
 
-CORRECT FORMAT:
-{
-  "tagline": {"value": "Our Services"},
-  "title": {"value": "What We Offer"},
-  "description": {"value": "Comprehensive solutions for your needs"},
-  "cards": {
-    "type": "array",
-    "values": [
-      {
-        "image": {"href": "modern office design with plants", "alt": "Office design"},
-        "title": {"value": "Office Design"},
-        "description": {"value": "Ergonomic workspace solutions"}
-      },
-      {
-        "image": {"href": "team collaboration meeting", "alt": "Team meeting"},
-        "title": {"value": "Team Collaboration"},
-        "description": {"value": "Spaces for effective teamwork"}
-      }
-    ]
-  }${
-		templatePages
-			? `,
-  "navigationLabels": ["Label 1", "Label 2"]`
-			: ''
-  }
+=====================
+EXPECTED SHAPE (fill with real content, 3–5 items for arrays)
+=====================
+${expectedShape}
+${
+	templatePages
+		? `
+If navigation labels were requested above, add to your JSON: "navigationLabels": ["Label 1", "Label 2", ...]`
+		: ''
 }
 
-IMPORTANT: For array items, include ALL required fields from the definition.
-Do NOT use "type" field inside array items unless specified in definition.
-
-Return ONLY valid JSON. All text in ${language}.
+Return ONLY valid JSON. All text in ${language}. No empty strings.
 `;
 
 	const completion = await openai.chat.completions.create({
@@ -307,8 +234,6 @@ export const prepareBlock = async (block, prompt, country, language, navigation 
 			null,
 			zip,
 		);
-
-		console.log('aiContent', aiContent);
 
 		const variables = navigation ? { ...aiContent, navigation } : aiContent;
 
@@ -384,15 +309,17 @@ export const prepareGlobalBlocks = async (
 
 				const navigation = {
 					type: 'nav',
-					value: templatePages.map((page, index) => ({
-						href: page.path === '/' ? './index.html' : `.${page.path}.html`,
-						label: navigationLabels?.[index] || page.title,
-						active: false,
-					})),
+					value:
+						templatePages?.length > 1
+							? templatePages.map((page, index) => ({
+									href: page.path === '/' ? './index.html' : `.${page.path}.html`,
+									label: navigationLabels?.[index] || page.title,
+									active: false,
+								}))
+							: [],
 				};
 
 				const variables = { ...aiContent, navigation };
-				console.log('aiContent', aiContent);
 				// const html = nunjucks.renderString(block.html, variables);
 
 				return { ...block, variables, tokens };
@@ -424,14 +351,14 @@ const scopeCss = (scss, blockId) => {
 	}
 };
 
-const scopeHtml = (block, blockId) => {
+const scopeHtml = (block, blockId, variables) => {
 	try {
 		const fallbackHTML = `<div id="${blockId}" class="generation-block-error">Failed to render ${block.blockType}</div>`;
 
 		const result = block.hasError
 			? fallbackHTML
 			: nunjucks.renderString(block.html, {
-					...block.variables,
+					...variables,
 					_blockId: blockId,
 				});
 		return `<!-- !HTML-BLOCK:${blockId}:START! -->${result}<!-- !HTML-BLOCK:${blockId}:END! -->`;
@@ -441,21 +368,57 @@ const scopeHtml = (block, blockId) => {
 	}
 };
 
-export const buildPageHtml = (page, globalCss, language, country, seo = {}) => {
+export const buildPageHtml = (page, globalCss, language, country, seo = {}, isPreview = false) => {
 	const filledBlocks = page.blocks.map((block, blockIndex) => {
 		const id = `${block.blockType}-${blockIndex}`;
+
+		const originalVariables = block.variables;
+		const previewVariables = replaceHrefWithHref64(block.variables);
 		return {
 			...block,
 			scopedCss: scopeCss(block.css, id),
-			html: scopeHtml(block, id),
+			html: scopeHtml(block, id, originalVariables),
+			previewHtml: scopeHtml(block, id, previewVariables),
 		};
 	});
 	const blocksHtml = filledBlocks.map((b) => b.html).join('\n');
+	const blocksPreviewHtml = filledBlocks.map((b) => b.previewHtml).join('\n');
 	const blocksCss = filledBlocks.map((b) => b.scopedCss).join('\n');
 	const cssVariables = Object.entries(globalCss || {})
 		.map(([key, value]) => `${key}: ${value};`)
 		.join('\n    ');
 
+	return {
+		html: getHtmlPageTemplate({
+			seo,
+			page,
+			country,
+			language,
+			blocksCss,
+			blocksHtml,
+			cssVariables,
+		}),
+		previewHtml: getHtmlPageTemplate({
+			seo,
+			page,
+			country,
+			language,
+			blocksCss,
+			blocksHtml: blocksPreviewHtml,
+			cssVariables,
+		}),
+	};
+};
+
+const getHtmlPageTemplate = ({
+	seo,
+	page,
+	country,
+	language,
+	cssVariables,
+	blocksCss,
+	blocksHtml,
+}) => {
 	return `<!DOCTYPE html>
 <html lang="${language}">
 <head>
@@ -506,9 +469,8 @@ export const buildPageHtml = (page, globalCss, language, country, seo = {}) => {
 </html>`;
 };
 
-export const buildSitePages = (pages, globalCss, language, country, seoPages) => {
-	return pages.map((page, pageIndex) => {
-		const seo = seoPages[pageIndex];
+export const buildSitePages = (pages, globalCss, language, country) => {
+	return pages.map((page) => {
 		const pageHasErrors = page?.blocks?.some((block) => block.hasError);
 		const blocks = page?.blocks?.map((block, blockIndex) => {
 			return {
@@ -524,12 +486,15 @@ export const buildSitePages = (pages, globalCss, language, country, seoPages) =>
 			};
 		});
 
+		const { html, previewHtml } = buildPageHtml(page, globalCss, language, country, page.seo);
+
 		return {
 			...page,
 			blocks,
 			pageHasErrors,
 			filename: page.path === '/' ? 'index.html' : `${page.path.replace('/', '')}.html`,
-			html: buildPageHtml(page, globalCss, language, country, seo),
+			html,
+			previewHtml,
 		};
 	});
 };
@@ -604,128 +569,151 @@ export const flatPageBlocks = (pages) => {
 	}, []);
 };
 
-export const generateAllPagesSeo = async (pages, prompt, language, country) => {
-	const systemPrompt = `Generate SEO attributes for multiple website pages.
+const replaceHrefWithHref64 = (value) => {
+	if (!value || typeof value !== 'object') return value;
 
-Language: ${language}
-Country: ${country}
-Pages: ${pages.map((p) => p.title).join(', ')}
-
-Return JSON array where each object has:
-{
-    "title": "SEO Title (50-60 chars)",
-    "description": "Meta description (150-160 chars)",
-    "keywords": "keyword1, keyword2, keyword3",
-    "ogTitle": "Title for social media",
-    "ogDescription": "Description for social media",
-}
-
-Return format:
-{
-    "pages": [
-        { "title": "Page1 SEO", "description": "...", ... },
-        { "title": "Page2 SEO", "description": "...", ... }
-    ]
-}`;
-
-	try {
-		const completion = await openai.chat.completions.create({
-			model: 'gpt-5-mini',
-			messages: [
-				{ role: 'system', content: systemPrompt },
-				{
-					role: 'user',
-					content: `Pages: ${pages.map((p) => p.title).join('\n')}\n\nPrompt: ${prompt}`,
-				},
-			],
-			temperature: 1,
-			response_format: { type: 'json_object' },
-		});
-
-		const result = JSON.parse(completion.choices[0].message.content);
-
-		const seoResults = pages.map((page, index) => ({
-			pageTitle: page.title,
-			...(result.pages[index] || {
-				title: page.title,
-				description: `${page.title} services in ${country}`,
-				keywords: `${page.title}, ${country}`,
-				ogTitle: page.title,
-				ogDescription: `${page.title} in ${country}`,
-			}),
-		}));
-
-		return [
-			seoResults,
-			{
-				totalPromptTokens: completion.usage.prompt_tokens,
-				totalCompletionTokens: completion.usage.completion_tokens,
-				totalTokens: completion.usage.total_tokens,
-			},
-		];
-	} catch (error) {
-		const fallbackSeo = pages.map((page) => ({
-			title: `${page.title} | ${country}`,
-			description: `${page.title} services in ${country}`,
-			keywords: `${page.title.toLowerCase().replace(/\s+/g, ', ')}, ${country}`,
-			ogTitle: page.title,
-			ogDescription: `${page.title} in ${country}`,
-		}));
-
-		return [fallbackSeo, { totalPromptTokens: 0, totalCompletionTokens: 0, totalTokens: 0 }];
+	if (Array.isArray(value)) {
+		return value.map((item) => replaceHrefWithHref64(item));
 	}
+
+	const newValue = { ...value };
+
+	for (const key in newValue) {
+		if (Object.hasOwn(newValue, key)) {
+			newValue[key] = replaceHrefWithHref64(newValue[key]);
+		}
+	}
+
+	if ('href' in newValue && 'href64' in newValue) {
+		newValue.href = newValue.href64;
+	}
+
+	return newValue;
 };
 
-function getRandomAndRemove(array, currentId) {
-	const filteredArray = array.filter((item) => item.block.id !== currentId);
+function buildVariablesDescription(variables) {
+	const lines = [];
+	for (const [name, v] of Object.entries(variables)) {
+		if (v?.type === 'nav') continue;
+		if (v?.type === 'array' && Array.isArray(v.values) && v.values[0]) {
+			const itemKeys = Object.entries(v.values[0])
+				.filter(([, field]) => typeof field === 'object' && field?.type)
+				.map(([k, field]) => `${k} (${field.type})`);
+			lines.push(`- ${name} (type: array). Each item: ${itemKeys.join(', ')}`);
+		} else {
+			const desc = v?.description ? ` — ${v.description}` : '';
+			lines.push(`- ${name} (type: ${v?.type ?? 'text'})${desc}`);
+		}
+	}
+	return lines.join('\n');
+}
+
+function buildExpectedShape(variables) {
+	const out = {};
+	for (const [name, v] of Object.entries(variables)) {
+		if (v?.type === 'nav') continue;
+		if (v?.type === 'array' && Array.isArray(v.values) && v.values[0]) {
+			const item = {};
+			for (const [k, field] of Object.entries(v.values[0])) {
+				if (typeof field !== 'object' || !field?.type) continue;
+				if (field.type === 'text') item[k] = { value: '...' };
+				else if (field.type === 'image') item[k] = { href: '...', alt: '...' };
+				else if (field.type === 'link')
+					item[k] = { value: null, href: '...', label: '...' };
+				else item[k] = { value: '...' };
+			}
+			out[name] = { type: 'array', values: [item, { ...JSON.parse(JSON.stringify(item)) }] };
+		} else if (v?.type === 'image') {
+			out[name] = { href: '...', alt: '...' };
+		} else if (v?.type === 'link') {
+			out[name] = { value: null, href: '...', label: '...' };
+		} else if (v?.type === 'anchor') {
+			out[name] = { href: '...', label: '...' };
+		} else if (v?.type === 'anchors') {
+			out[name] = { value: [] };
+		} else {
+			out[name] = { value: '...' };
+		}
+	}
+	return JSON.stringify(out, null, 2);
+}
+
+function getRandomAndRemove(array, currentId, currentBlockIndex) {
+	const filteredArray = array.filter(
+		(item) => item.block.id !== currentId || item.blockIndex !== currentBlockIndex,
+	);
 	if (filteredArray.length === 0) return { updatedArray: array, selectedItem: null };
 	const randomIndex = Math.floor(Math.random() * filteredArray.length);
 	const selectedItem = filteredArray[randomIndex];
-	const updatedArray = array.filter((item) => item.block.id !== selectedItem.id);
+	const updatedArray = array.filter((item) => {
+		return !(
+			item.block.id === selectedItem.block.id && item.blockIndex === selectedItem.blockIndex
+		);
+	});
 	return { updatedArray, selectedItem };
 }
 
 export const fillAnchors = (pages) => {
 	return pages.map((page) => {
-		let freeBlocks = page.blocks.map((block, blockIndex) => ({
-			block,
-			blockIndex,
-		}));
-		const allAnchors = [];
-		const updatedBlocks = page.blocks.map((block) => {
+		let freeBlocks = page.blocks
+			.map((block, blockIndex) => ({
+				block,
+				blockIndex,
+			}))
+			.filter(
+				(blockInfo) =>
+					blockInfo.block.category !== 'header' && blockInfo.block.category !== 'footer',
+			);
+		const startBlocksLength = freeBlocks.length;
+		const allAnchors = new Map();
+		const updatedBlocks = page.blocks.map((block, blockIndexGlobal) => {
 			let newBlock = JSON.parse(JSON.stringify(block));
-			if (freeBlocks.length > 1 && !newBlock.hasError) {
+
+			if (startBlocksLength > 1 && newBlock.definition.variables) {
 				Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
 					if (values.type === 'anchor') {
-						let result = getRandomAndRemove(freeBlocks, newBlock.id);
-
+						let result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
 						if (!result.selectedItem) {
-							freeBlocks = page.blocks.map((block, blockIndex) => ({
-								block,
-								blockIndex,
-							}));
-							result = getRandomAndRemove(freeBlocks, newBlock.id);
+							freeBlocks = page.blocks
+								.map((block, blockIndex) => ({
+									block,
+									blockIndex,
+								}))
+								.filter(
+									(blockInfo) =>
+										blockInfo.block.category !== 'header' &&
+										blockInfo.block.category !== 'footer',
+								);
+							result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
 						}
 						const href = `#${result.selectedItem.block.category}-${result.selectedItem.blockIndex}`;
 						const label = newBlock.variables[key].label || 'Link';
-
 						newBlock.variables[key].href = href;
-						allAnchors.push({ href, label });
-
+						allAnchors.set(href, label);
 						freeBlocks = result.updatedArray;
+					}
+				});
+			} else {
+				Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
+					if (values.type === 'anchor') {
+						const href = '#';
+						const label = '';
+						newBlock.variables[key].href = href;
+						newBlock.variables[key].label = label;
 					}
 				});
 			}
 			return newBlock;
 		});
+		const uniqueAnchorsList = Array.from(allAnchors.entries()).map(([href, label]) => ({
+			href,
+			label,
+		}));
 
 		updatedBlocks.forEach((block) => {
 			Object.entries(block.definition.variables).forEach(([key, val]) => {
 				if (val.type === 'anchors') {
-					block.variables[key].value = allAnchors.map((link) => ({
-						href: link.href,
-						label: link.label,
-					}));
+					block.variables[key].value = uniqueAnchorsList;
 				}
 			});
 		});

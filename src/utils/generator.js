@@ -2,7 +2,6 @@ import {
 	buildSitePages,
 	fillAnchors,
 	flatPageBlocks,
-	generateAllPagesSeo,
 	generateTheme,
 	getBlockByType,
 	getBlocks,
@@ -11,6 +10,7 @@ import {
 } from './blocks.js';
 import { PRICE_FOR_PROMPTS_OPENAI } from '../config/constants.js';
 import dayjs from 'dayjs';
+import { generatePagesWithAI } from './pages.js';
 
 export const generateSite = async ({ currentTokens, template, prompt, country, language, zip }) => {
 	const tokensInfo = {
@@ -20,16 +20,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		totalFalCost: currentTokens.totalFalCost ?? 0,
 	};
 
-	const populateSEO = async (pages, prompt, language, country) => {
-		const [seoPages, seoTokens] = await generateAllPagesSeo(pages, prompt, language, country);
-
-		return {
-			seoPages,
-			tokens: seoTokens,
-		};
-	};
-
-	const populatePagesWithContent = async (template) => {
+	const populatePagesWithContent = async (template, pages) => {
 		const tokens = {
 			totalPromptTokens: 0,
 			totalCompletionTokens: 0,
@@ -40,7 +31,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		const globalBlocks = await getBlocks(template?.definition?.globals?.blocks);
 		const preparedGlobalBlocks = await prepareGlobalBlocks(
 			globalBlocks,
-			template?.definition?.pages,
+			pages,
 			prompt,
 			country,
 			language,
@@ -55,7 +46,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 
 		const globalBlocksMap = new Map(preparedGlobalBlocks.map((b) => [b.category, b]));
 
-		const pagesBlocks = flatPageBlocks(template.definition.pages);
+		const pagesBlocks = flatPageBlocks(pages);
 		const generatedBlocks = await Promise.allSettled(
 			pagesBlocks.map(async (blockDef) => {
 				const isGlobal = globalBlocksMap.has(blockDef.type);
@@ -105,7 +96,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 			}),
 		);
 		const pagesWithBlocks = generatedBlocks.map((blockResult) => blockResult.value);
-		const populatedPages = template.definition.pages.reduce((acc, page, pageIndex) => {
+		const populatedPages = pages.reduce((acc, page, pageIndex) => {
 			const blocks = pagesWithBlocks.filter((block) => block.pageIndex === pageIndex);
 			return [
 				...acc,
@@ -131,17 +122,19 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		};
 	};
 
+	const { pages: generatedPages, tokens: seoTokens } = await generatePagesWithAI({
+		prompt,
+		pages: template.definition.pages,
+		country,
+		language,
+	});
+
 	const final = await Promise.all([
 		populateTheme(prompt),
-		populatePagesWithContent(template),
-		populateSEO(template.definition.pages, prompt, language, country),
+		populatePagesWithContent(template, generatedPages),
 	]);
 
-	const [
-		{ theme: generatedTheme, tokens: themeTokens },
-		{ pages, tokens: pagesTokens },
-		{ seoPages, tokens: seoTokens },
-	] = final;
+	const [{ theme: generatedTheme, tokens: themeTokens }, { pages, tokens: pagesTokens }] = final;
 
 	tokensInfo.totalPromptTokens +=
 		themeTokens.totalPromptTokens + pagesTokens.totalPromptTokens + seoTokens.totalPromptTokens;
@@ -149,6 +142,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		themeTokens.totalCompletionTokens +
 		pagesTokens.totalCompletionTokens +
 		seoTokens.totalCompletionTokens;
+
 	tokensInfo.totalTokens +=
 		themeTokens.totalTokens + pagesTokens.totalTokens + seoTokens.totalTokens;
 	tokensInfo.totalFalCost += pagesTokens.totalFalCost;
@@ -164,7 +158,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
 	const openAiTotalPrice = openAiInputPrice + openAiOutputPrice;
 	const updatedPages = fillAnchors(pages);
-	const sitePages = buildSitePages(updatedPages, globalCss, language, country, seoPages);
+	const sitePages = buildSitePages(updatedPages, globalCss, language, country);
 	const siteConfigDetailed = {
 		pages: sitePages?.map((page) => ({
 			title: page.title,
@@ -172,7 +166,6 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 			filename: page.filename,
 			blocks: page.blocks,
 		})),
-		seoPages,
 		generatedTheme: globalCss,
 	};
 
@@ -186,7 +179,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		sitePages,
 		siteConfigDetailed,
 		previews: sitePages.map((page) => ({
-			html: page.html,
+			html: page.previewHtml,
 			filename: page.filename,
 			hasErrors: page.pageHasErrors,
 		})),
@@ -203,7 +196,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 	};
 };
 
-export const generateSitemapXml = (sitePages, domain) => {
+export const generateSitemapXml = (sitePages, domain = 'http://localhost:3000') => {
 	try {
 		let baseUrl;
 
@@ -283,4 +276,28 @@ ${urlEntries}
 			errorMessage: error.message,
 		};
 	}
+};
+
+export const generateNginxConfig = ({ serverName, rootDir } = {}) => {
+	const cleanServerName = serverName
+		? serverName
+				.replace(/^https?:\/\//i, '')
+				.replace(/\/.*$/, '')
+				.trim()
+		: '';
+	const effectiveServerName = cleanServerName.length > 0 ? cleanServerName : '_';
+	const effectiveRootDir = rootDir?.trim() || '/var/www/html';
+
+	return `server {
+	listen 80;
+	server_name ${effectiveServerName};
+
+	# Adjust root to the folder where you unpacked the site
+	root ${effectiveRootDir};
+	index index.html;
+
+	location / {
+		try_files $uri $uri/ $uri.html /index.html;
+	}
+}`;
 };
