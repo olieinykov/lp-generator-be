@@ -9,7 +9,7 @@ import {
 } from './blocks.js';
 import { PRICE_FOR_PROMPTS_OPENAI } from '../config/constants.js';
 import dayjs from 'dayjs';
-import {generatePagesWithAI} from "./pages.js";
+import { generatePagesWithAI } from './pages.js';
 
 export const generateSite = async ({ currentTokens, template, prompt, country, language, zip }) => {
 	const tokensInfo = {
@@ -65,7 +65,14 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 						};
 					} else {
 						const block = await getBlockByType(blockDef.type);
-						const preparedBlock = await prepareBlock(block, prompt, country, language, null, zip);
+						const preparedBlock = await prepareBlock(
+							block,
+							prompt,
+							country,
+							language,
+							null,
+							zip,
+						);
 
 						tokens.totalPromptTokens += preparedBlock.tokens.promptTokens;
 						tokens.totalCompletionTokens += preparedBlock.tokens.completionTokens;
@@ -118,7 +125,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		prompt,
 		pages: template.definition.pages,
 		country,
-		language
+		language,
 	});
 
 	const final = await Promise.all([
@@ -126,10 +133,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		populatePagesWithContent(template, generatedPages),
 	]);
 
-	const [
-		{ theme: generatedTheme, tokens: themeTokens },
-		{ pages, tokens: pagesTokens },
-	] = final;
+	const [{ theme: generatedTheme, tokens: themeTokens }, { pages, tokens: pagesTokens }] = final;
 
 	tokensInfo.totalPromptTokens +=
 		themeTokens.totalPromptTokens + pagesTokens.totalPromptTokens + seoTokens.totalPromptTokens;
@@ -191,7 +195,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 	};
 };
 
-export const generateSitemapXml = (sitePages, domain = "http://localhost:3000") => {
+export const generateSitemapXml = (sitePages, domain = 'http://localhost:3000') => {
 	try {
 		let baseUrl;
 
@@ -275,7 +279,10 @@ ${urlEntries}
 
 export const generateNginxConfig = ({ serverName, rootDir } = {}) => {
 	const cleanServerName = serverName
-		? serverName.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim()
+		? serverName
+				.replace(/^https?:\/\//i, '')
+				.replace(/\/.*$/, '')
+				.trim()
 		: '';
 	const effectiveServerName = cleanServerName.length > 0 ? cleanServerName : '_';
 	const effectiveRootDir = rootDir?.trim() || '/var/www/html';

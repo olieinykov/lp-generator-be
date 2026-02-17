@@ -265,7 +265,15 @@ export default {
 	constants: archiveConstants,
 };
 
-export const replaceSiteZipWithNew = async (sitePages, siteName, existingArchiveUrl, zip, sitemapXml, sitemapError, nginxConfig) => {
+export const replaceSiteZipWithNew = async (
+	sitePages,
+	siteName,
+	existingArchiveUrl,
+	zip,
+	sitemapXml,
+	sitemapError,
+	nginxConfig,
+) => {
 	const zipEntries = zip.getEntries();
 
 	zipEntries.forEach((entry) => {
