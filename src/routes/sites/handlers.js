@@ -518,6 +518,7 @@ export const regenerateBlock = async (request, reply) => {
 							id: generatedBlock.id,
 							isGlobal: isBlockGlobal,
 							blockType: generatedBlock.category,
+							category: generatedBlock.category,
 							blockIndex: blockIndex,
 							generationBlockId: `${generatedBlock.category}-${blockIndex}`,
 							definition: generatedBlock.definition,
@@ -527,13 +528,17 @@ export const regenerateBlock = async (request, reply) => {
 							html: generatedBlock.html,
 						};
 					}
-
-					return block;
+					
+					return {
+							...block,
+							id: block.blockId,
+							category: block.blockType,
+						};
 				}),
 			};
 		});
 
-		const updatedPagesWithAnchor = fillAnchors(updatedPages);
+		const updatedPagesWithAnchor = fillAnchors(updatedPages, isBlockGlobal ? '' : pageName);
 
 		const sitePages = buildSitePages(
 			updatedPagesWithAnchor,
