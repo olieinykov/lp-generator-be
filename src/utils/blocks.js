@@ -632,81 +632,87 @@ const getRandomAndRemove = (array, currentId, currentBlockIndex) => {
 }
 
 export const fillAnchors = (pages, targetPage = '') => {
-	return pages.map((page) => {
-		if (targetPage && page.filename !== targetPage) {
-			return page;
-		}
+	try{
+		return pages.map((page) => {
+				if (targetPage && page.filename !== targetPage) {
+					return page;
+				}
 
-		let freeBlocks = page.blocks
-			.map((block, blockIndex) => ({
-				block,
-				blockIndex,
-			}))
-			.filter(
-				(blockInfo) =>
-					blockInfo.block.category !== 'header' && blockInfo.block.category !== 'footer',
-			);
-		const startBlocksLength = freeBlocks.length;
-		const allAnchors = new Map();
+				let freeBlocks = page.blocks
+					.map((block, blockIndex) => ({
+						block,
+						blockIndex,
+					}))
+					.filter(
+						(blockInfo) =>
+							blockInfo.block.category !== 'header' && blockInfo.block.category !== 'footer',
+					);
+				const startBlocksLength = freeBlocks.length;
+				const allAnchors = new Map();
 
-		const fillVars = (newBlock, key, result) => {
-				const href = `#${result.selectedItem.block.category}-${result.selectedItem.blockIndex}`;
-				const label = newBlock.variables[key].label;
-				newBlock.variables[key].href = href;
-				allAnchors.set(href, label);
-				freeBlocks = result.updatedArray;
-		}
+				const fillVars = (newBlock, key, result) => {
+						const href = `#${result.selectedItem.block.category}-${result.selectedItem.blockIndex}`;
+						const label = newBlock.variables[key].label;
+						newBlock.variables[key].href = href;
+						allAnchors.set(href, label);
+						freeBlocks = result.updatedArray;
+				}
 
-		const updatedBlocks = page.blocks.map((block, blockIndexGlobal) => {
-			let newBlock = JSON.parse(JSON.stringify(block));
+				const updatedBlocks = page.blocks.map((block, blockIndexGlobal) => {
+					let newBlock = JSON.parse(JSON.stringify(block));
 
-			if (startBlocksLength >= 1 && newBlock.definition.variables) {
-				Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
-					if (values.type === 'anchor') {
-						const isOnlyCurrentBlockLeft = freeBlocks.length === 1 && 
-							freeBlocks[0].block.id === newBlock.id && 
-							freeBlocks[0].blockIndex === blockIndexGlobal;
-						if(startBlocksLength > 1 && (isOnlyCurrentBlockLeft || freeBlocks.length === 0)){
-								freeBlocks = page.blocks
-						 		.map((block, blockIndex) => ({
-						 			block,
-						 			blockIndex,
-						 		}))
-						 		.filter(
-						 			(blockInfo) =>
-						 				blockInfo.block.category !== 'header' &&
-						 				blockInfo.block.category !== 'footer',
-						 		);
-						}
+					if (startBlocksLength >= 1 && newBlock.definition.variables) {
+						Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
+							if (values.type === 'anchor') {
+								const isOnlyCurrentBlockLeft = freeBlocks.length === 1 && 
+									freeBlocks[0].block.id === newBlock.id && 
+									freeBlocks[0].blockIndex === blockIndexGlobal;
+								if(startBlocksLength > 1 && (isOnlyCurrentBlockLeft || freeBlocks.length === 0)){
+										freeBlocks = page.blocks
+										.map((block, blockIndex) => ({
+											block,
+											blockIndex,
+										}))
+										.filter(
+											(blockInfo) =>
+												blockInfo.block.category !== 'header' &&
+												blockInfo.block.category !== 'footer',
+										);
+								}
 
-						let result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
+								let result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
 
-						if(!result.selectedItem && startBlocksLength === 1){
-							newBlock.variables[key].href = "";
-							newBlock.variables[key].label = "";
-							return
-						}
+								if(!result.selectedItem && startBlocksLength === 1){
+									newBlock.variables[key].href = "";
+									newBlock.variables[key].label = "";
+									return
+								}
 
-						fillVars(newBlock, key, result);
-					}
+								fillVars(newBlock, key, result);
+							}
+						});
+					} 
+					return newBlock;
 				});
-			} 
-			return newBlock;
-		});
-		
-		const uniqueAnchorsList = Array.from(allAnchors.entries()).map(([href, label]) => ({
-		 	href,
-		 	label,
-		}));
+				
+				const uniqueAnchorsList = Array.from(allAnchors.entries()).map(([href, label]) => ({
+					href,
+					label,
+				}));
 
-		updatedBlocks.forEach((block) => {
-		 	Object.entries(block.definition.variables).forEach(([key, val]) => {
-		 		if (val.type === 'anchors') {
-		 			block.variables[key].value = uniqueAnchorsList;
-		 		}
-		 	});
-		});
+				updatedBlocks.forEach((block) => {
+					Object.entries(block.definition.variables).forEach(([key, val]) => {
+						if (val.type === 'anchors') {
+							block.variables[key].value = uniqueAnchorsList;
+						}
+					});
+				});
 
-		return { ...page, blocks: updatedBlocks };
-	});
+				return { ...page, blocks: updatedBlocks };
+			});
+	} catch(err){
+		console.error("Error in fillAnchors function: ", err)
+		return pages
+	}
+	
 };
