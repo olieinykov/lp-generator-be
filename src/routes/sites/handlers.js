@@ -510,6 +510,13 @@ export const regenerateBlock = async (request, reply) => {
 			return {
 				...page,
 				blocks: page.blocks.map((block, blockIndex) => {
+					if (block.generationBlockId !== generationBlockId) {
+						return {
+							...block,
+							id: block.blockId,
+							category: block.blockType,
+						};
+					}
 					const generationBlockMatch = block.generationBlockId === generationBlockId;
 					const globalTypeMatch =
 						isBlockGlobal && block.blockType === generatedBlock.category;
@@ -518,6 +525,7 @@ export const regenerateBlock = async (request, reply) => {
 							id: generatedBlock.id,
 							isGlobal: isBlockGlobal,
 							blockType: generatedBlock.category,
+							category: generatedBlock.category,
 							blockIndex: blockIndex,
 							generationBlockId: `${generatedBlock.category}-${blockIndex}`,
 							definition: generatedBlock.definition,
@@ -533,7 +541,7 @@ export const regenerateBlock = async (request, reply) => {
 			};
 		});
 
-		const updatedPagesWithAnchor = fillAnchors(updatedPages);
+		const updatedPagesWithAnchor = fillAnchors(updatedPages, isBlockGlobal ? '' : pageName);
 
 		const sitePages = buildSitePages(
 			updatedPagesWithAnchor,

@@ -36,7 +36,7 @@ const generateImageWithFal = async (prompt, zip) => {
 
 		return {
 			url: zipPath,
-			base64: response.url,
+			//base64: response.url,
 			cost: Number(cost.toFixed(4)),
 			size: `${image.width}x${image.height}`,
 		};
@@ -57,7 +57,7 @@ const processImages = async (content, variables, zip) => {
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
 			const { url, base64, cost } = await generateImageWithFal(value.href, zip);
 			content[key].href = url;
-			content[key].href64 = base64;
+			//content[key].href64 = base64;
 			totalFalCost += cost;
 		}
 
@@ -70,7 +70,7 @@ const processImages = async (content, variables, zip) => {
 							zip,
 						);
 						item[itemKey].href = url;
-						item[itemKey].href64 = base64;
+						//item[itemKey].href64 = base64;
 						totalFalCost += cost;
 					}
 				}
@@ -150,6 +150,8 @@ Use exactly these variable names and structure. Format:
 - text: {"variableName": {"value": "content"}}
 - image: {"variableName": {"href": "image description for AI", "alt": "alt text"}}
 - link: {"variableName": {"href": "url", "label": "text"}}
+- anchor: {"variableName": {"href": "url", "label": "text"}}
+- anchors: {"variableName": {"value": []}}
 - array: {"variableName": {"type": "array", "values": [{ ...each key from above list... }, ...]}}
 
 =====================
@@ -603,6 +605,10 @@ function buildExpectedShape(variables) {
 			out[name] = { href: '...', alt: '...' };
 		} else if (v?.type === 'link') {
 			out[name] = { value: null, href: '...', label: '...' };
+		} else if (v?.type === 'anchor') {
+			out[name] = { href: '...', label: '...' };
+		} else if (v?.type === 'anchors') {
+			out[name] = { value: [] };
 		} else {
 			out[name] = { value: '...' };
 		}
@@ -641,59 +647,65 @@ export const fillAnchors = (pages, targetPage = '') => {
 					blockInfo.block.category !== 'header' && blockInfo.block.category !== 'footer',
 			);
 		const startBlocksLength = freeBlocks.length;
-		// const allAnchors = new Map();
+		const allAnchors = new Map();
+
+		const fillVars = (newBlock, key, result) => {
+				const href = `#${result.selectedItem.block.category}-${result.selectedItem.blockIndex}`;
+				const label = newBlock.variables[key].label;
+				newBlock.variables[key].href = href;
+				allAnchors.set(href, label);
+				freeBlocks = result.updatedArray;
+		}
+
 		const updatedBlocks = page.blocks.map((block, blockIndexGlobal) => {
 			let newBlock = JSON.parse(JSON.stringify(block));
 
-			if (startBlocksLength > 1 && newBlock.definition.variables) {
+			if (startBlocksLength >= 1 && newBlock.definition.variables) {
 				Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
 					if (values.type === 'anchor') {
+						const isOnlyCurrentBlockLeft = freeBlocks.length === 1 && 
+							freeBlocks[0].block.id === newBlock.id && 
+							freeBlocks[0].blockIndex === blockIndexGlobal;
+						if(startBlocksLength > 1 && (isOnlyCurrentBlockLeft || freeBlocks.length === 0)){
+								freeBlocks = page.blocks
+						 		.map((block, blockIndex) => ({
+						 			block,
+						 			blockIndex,
+						 		}))
+						 		.filter(
+						 			(blockInfo) =>
+						 				blockInfo.block.category !== 'header' &&
+						 				blockInfo.block.category !== 'footer',
+						 		);
+						}
+
 						let result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
-						// if (!result.selectedItem) {
-						// 	freeBlocks = page.blocks
-						// 		.map((block, blockIndex) => ({
-						// 			block,
-						// 			blockIndex,
-						// 		}))
-						// 		.filter(
-						// 			(blockInfo) =>
-						// 				blockInfo.block.category !== 'header' &&
-						// 				blockInfo.block.category !== 'footer',
-						// 		);
-						// 	result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
-						// }
-						const href = `#${result.selectedItem.block.category}-${result.selectedItem.blockIndex}`;
-						// const label = newBlock.variables[key].label || 'Link';
-						newBlock.variables[key].href = href;
-						// allAnchors.set(href, label);
-						freeBlocks = result.updatedArray;
+
+						if(!result.selectedItem && startBlocksLength === 1){
+							newBlock.variables[key].href = "";
+							newBlock.variables[key].label = "";
+							return
+						}
+
+						fillVars(newBlock, key, result);
 					}
 				});
-			} else {
-				Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
-					if (values.type === 'anchor') {
-						const href = '#';
-						const label = '';
-						newBlock.variables[key].href = href;
-						newBlock.variables[key].label = label;
-					}
-				});
-			}
+			} 
 			return newBlock;
 		});
-		// const uniqueAnchorsList = Array.from(allAnchors.entries()).map(([href, label]) => ({
-		// 	href,
-		// 	label,
-		// }));
+		
+		const uniqueAnchorsList = Array.from(allAnchors.entries()).map(([href, label]) => ({
+		 	href,
+		 	label,
+		}));
 
-		//TODO:
-		// updatedBlocks.forEach((block) => {
-		// 	Object.entries(block.definition.variables).forEach(([key, val]) => {
-		// 		if (val.type === 'anchors') {
-		// 			block.variables[key].value = uniqueAnchorsList;
-		// 		}
-		// 	});
-		// });
+		updatedBlocks.forEach((block) => {
+		 	Object.entries(block.definition.variables).forEach(([key, val]) => {
+		 		if (val.type === 'anchors') {
+		 			block.variables[key].value = uniqueAnchorsList;
+		 		}
+		 	});
+		});
 
 		return { ...page, blocks: updatedBlocks };
 	});
