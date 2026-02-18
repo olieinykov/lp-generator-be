@@ -510,13 +510,6 @@ export const regenerateBlock = async (request, reply) => {
 			return {
 				...page,
 				blocks: page.blocks.map((block, blockIndex) => {
-					if (block.generationBlockId !== generationBlockId) {
-						return {
-							...block,
-							id: block.blockId,
-							category: block.blockType,
-						};
-					}
 					const generationBlockMatch = block.generationBlockId === generationBlockId;
 					const globalTypeMatch =
 						isBlockGlobal && block.blockType === generatedBlock.category;
@@ -535,8 +528,12 @@ export const regenerateBlock = async (request, reply) => {
 							html: generatedBlock.html,
 						};
 					}
-
-					return block;
+					
+					return {
+							...block,
+							id: block.blockId,
+							category: block.blockType,
+						};
 				}),
 			};
 		});

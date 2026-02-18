@@ -10,9 +10,11 @@ const REQUIRED_FILES = ['definition.json', 'index.njk', 'styles.scss'];
 const ALLOWED_KEYS = {
 	text: ['type', 'value'],
 	image: ['type', 'href', 'alt'],
-	link: ['type', 'href', 'label'],
+	link: ['type', 'href', 'value', 'label'],
 	array: ['type', 'values'],
 	nav: ['type', 'value'],
+	anchor: ['type', 'href', 'label'],
+	anchors: ['type', 'value'],
 };
 
 const ALLOWED_EXTENSIONS = ['.zip'];
@@ -76,10 +78,20 @@ function validateField(key, field) {
 			break;
 		case 'link':
 			if (typeof field.href !== 'string' || typeof field.label !== 'string') {
-				throw new Error(`Field "${key}" must have "value", "href" and "label"`);
+				throw new Error(`Field "${key}" must have "href" and "label"`);
 			}
 			break;
 		case 'nav':
+			if (!Array.isArray(field.value)) {
+				throw new Error(`Field "${key}" must have "value" as an array`);
+			}
+			break;
+		case 'anchor':
+			if (typeof field.href !== 'string' || typeof field.label !== 'string') {
+				throw new Error(`Field "${key}" must have "href" and "label"`);
+			}
+			break;
+		case 'anchors':
 			if (!Array.isArray(field.value)) {
 				throw new Error(`Field "${key}" must have "value" as an array`);
 			}
