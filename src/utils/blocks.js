@@ -36,7 +36,7 @@ const generateImageWithFal = async (prompt, zip) => {
 
 		return {
 			url: zipPath,
-			base64: response.url,
+			//base64: response.url,
 			cost: Number(cost.toFixed(4)),
 			size: `${image.width}x${image.height}`,
 		};
@@ -57,7 +57,7 @@ const processImages = async (content, variables, zip) => {
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
 			const { url, base64, cost } = await generateImageWithFal(value.href, zip);
 			content[key].href = url;
-			content[key].href64 = base64;
+			//content[key].href64 = base64;
 			totalFalCost += cost;
 		}
 
@@ -70,7 +70,7 @@ const processImages = async (content, variables, zip) => {
 							zip,
 						);
 						item[itemKey].href = url;
-						item[itemKey].href64 = base64;
+						//item[itemKey].href64 = base64;
 						totalFalCost += cost;
 					}
 				}
@@ -672,6 +672,9 @@ export const fillAnchors = (pages, targetPage = '') => {
 					if (startBlocksLength >= 1 && newBlock.definition.variables) {
 						Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
 							if (values.type === 'anchor') {
+								if (!newBlock.variables[key]) {
+                                	return;
+                            	}
 								const isOnlyCurrentBlockLeft = freeBlocks.length === 1 && 
 									freeBlocks[0].block.id === newBlock.id && 
 									freeBlocks[0].blockIndex === blockIndexGlobal;
@@ -725,93 +728,120 @@ export const fillAnchors = (pages, targetPage = '') => {
 	
 };
 
-export const expandedDefinition = async (blockDef, level = 0, rootVariables = {}, currentParent = null, maxLevel = 5) => {
-    if (level > maxLevel) {
-        console.warn(`Reached max nesting level: ${maxLevel}. Stopping recursion.`);
-        return { newVariables: rootVariables, usedKeys: [] };
-    }
-	
-	if (level === 0) {
-        Object.assign(rootVariables, JSON.parse(JSON.stringify(blockDef.variables)));
+export const expandedDefinition = async (blockDef, level = 0, rootVariables = {}, currentParent = null, maxLevel = 5, rootKey = "") => {
+    if (level > maxLevel) return { newVariables: rootVariables, usedKeys: [], contents: [] };
+
+    if (level === 0) {
+        Object.assign(rootVariables, JSON.parse(JSON.stringify(blockDef.variables || {})));
     }
 
-    const currentVars = blockDef.variables;
     let allUsedKeys = [];
-	let allContents = [];
+    let allContents = [];
 
-    for (const [key, value] of Object.entries(currentVars)) {
-        if (value.type === "block") {
-            allUsedKeys.push({ level, key });
-            const childBlockInfo = await getBlockByType(value.blockType);
-            const childVars = childBlockInfo.definition.variables;
+    const currentVars = blockDef.variables || {};
+    const entries = Object.entries(currentVars).filter(([_, v]) => v.type === "block");
 
-			let thisBlockObject;
-            if (level === 0) {
-                thisBlockObject = rootVariables[key];
-            } else if (currentParent) {
-                thisBlockObject = currentParent[key];
-            }
+    for (const [key, value] of entries) {
+		const currentRootKey = level === 0 ? key : rootKey;
 
-            if (thisBlockObject) {
-                thisBlockObject.blockType = {};
-            }
+        allUsedKeys.push({ level, key });
+        const childBlockInfo = await getBlockByType(value.blockType);
+        
+        if (!childBlockInfo) {
+            console.warn(`[Warning] There no block for type: ${value.blockType}`);
+            continue;
+        }
 
-			allContents.push({
-                level,
-                key,
-                content: {
-                    html: childBlockInfo.html,
-                    css: childBlockInfo.css
-                }
-            });
+        let targetRef = (level === 0) ? rootVariables[key] : (currentParent ? currentParent[key] : null);
 
-            Object.entries(childVars).forEach(([childKey, childValue]) => {
-                if (childValue.type !== "block") {
-                    const flatName = `${childKey}${key}${level}`;
-                    rootVariables[flatName] = JSON.parse(JSON.stringify(childValue));
-                } else {
-                    if (thisBlockObject) {
-                        thisBlockObject.blockType[childKey] = {};
-                    }
-                }
-            });
+        if (!targetRef) continue;
 
-            const hasNestedBlocks = Object.values(childVars).some(v => v.type === "block");
+        targetRef.blockType = {}; 
 
-            if (hasNestedBlocks) {
-				console.log("IN NESTED BLOCK ==== ")
-				const nextParent = thisBlockObject ? thisBlockObject.blockType : null;
-                const nestedResult = await expandedDefinition(childBlockInfo.definition, level + 1, rootVariables, nextParent);
-				if (nestedResult.usedKeys.length > 0) {
-                    allUsedKeys = [...allUsedKeys, ...nestedResult.usedKeys];
-					allContents = [...allContents, ...nestedResult.contents];
-                }
+        allContents.push({
+            level,
+            key,
+            content: { html: childBlockInfo.html, css: childBlockInfo.css }
+        });
+
+        const childVars = childBlockInfo.definition.variables || {};
+        
+        for (const [cKey, cValue] of Object.entries(childVars)) {
+            if (cValue.type !== "block") {
+                const flatName = `${cKey}${currentRootKey}${key}${level}`;
+                rootVariables[flatName] = JSON.parse(JSON.stringify(cValue));
+            } else {
+                targetRef.blockType[cKey] = JSON.parse(JSON.stringify(cValue));
             }
         }
+
+        const nextInnerBlocks = Object.entries(childVars).filter(([_, v]) => v.type === "block");
+
+        if (nextInnerBlocks.length > 0) {
+            const [firstInnerKey] = nextInnerBlocks[0];
+
+            const nextStepData = targetRef.blockType[firstInnerKey];
+            targetRef.blockType = { [firstInnerKey]: nextStepData };
+
+            const res = await expandedDefinition(
+                childBlockInfo.definition,
+                level + 1,
+                rootVariables,
+                targetRef.blockType, 
+                maxLevel,
+				currentRootKey
+            );
+
+            allUsedKeys = [...allUsedKeys, ...res.usedKeys];
+            allContents = [...allContents, ...res.contents];
+        }
+
+        if (level > 0) break;
     }
+
     return { newVariables: rootVariables, usedKeys: allUsedKeys, contents: allContents };
 };
 
 export const transformToStructuredBlocks = (preparedBlock, usedKeys, contents) => {
     const variables = preparedBlock.variables;
-	const blockContainers = usedKeys.map(({ level, key }) => {
+    const allSuffixes = usedKeys.map(uk => `${uk.key}${uk.level}`);
+
+    const blockContainers = usedKeys.map(({ level, key }) => {
         const suffix = `${key}${level}`;
-       	const blockData = {
-        	blockType: variables[key] ? JSON.parse(JSON.stringify(variables[key].blockType || {})) : {}
-    	};
+        const blockData = { blockType: {} };
 
         Object.keys(variables).forEach(fullKey => {
             if (fullKey.endsWith(suffix)) {
-                const realVarName = fullKey.slice(0, -suffix.length);
-                blockData.blockType[realVarName] = JSON.parse(JSON.stringify(variables[fullKey]));
+                let realVarName = fullKey.slice(0, -suffix.length);
+                if (realVarName.endsWith(key) && realVarName !== key) {
+                    realVarName = realVarName.slice(0, -key.length);
+                }
+
+                if (realVarName) {
+                    blockData.blockType[realVarName] = JSON.parse(JSON.stringify(variables[fullKey]));
+                }
             }
         });
 
-        const contentMatch = contents.find(c => c.level === level && c.key === key);
-        const templateHtml = contentMatch ? contentMatch.content.html : "";
-		preparedBlock.css += "\n" + contentMatch.content.css;
+        const originalVar = variables[key];
+        if (originalVar && originalVar.blockType) {
+            Object.keys(originalVar.blockType).forEach(subKey => {
+                let cleanSubKey = subKey;
+                if (cleanSubKey.endsWith(key) && cleanSubKey !== key) {
+                    cleanSubKey = cleanSubKey.slice(0, -key.length);
+                }
+                if (!blockData.blockType[cleanSubKey]) {
+                    blockData.blockType[cleanSubKey] = { type: "block" };
+                }
+            });
+        }
 
-        return { level, key, data: blockData, templateHtml };
+        const contentMatch = contents.find(c => c.level === level && c.key === key);
+        if (contentMatch?.content?.css) {
+            preparedBlock.css += "\n" + contentMatch.content.css;
+        }
+
+        return { level, key, data: blockData, templateHtml: contentMatch?.content?.html || "" };
     });
 
     const sortedContainers = [...blockContainers].sort((a, b) => b.level - a.level);
@@ -828,11 +858,12 @@ export const transformToStructuredBlocks = (preparedBlock, usedKeys, contents) =
 
         if (container.level > 0) {
             const parent = sortedContainers.find(p => 
-                p.level === container.level - 1 && p.data.blockType.hasOwnProperty(container.key)
+                p.level === container.level - 1 && 
+                p.data.blockType.hasOwnProperty(container.key)
             );
 
             if (parent) {
-                if (!parent.data.blockType[container.key]) {
+                if (typeof parent.data.blockType[container.key] !== 'object') {
                     parent.data.blockType[container.key] = {};
                 }
                 parent.data.blockType[container.key].htmlContent = renderedHtml;
@@ -840,21 +871,91 @@ export const transformToStructuredBlocks = (preparedBlock, usedKeys, contents) =
         }
     });
 
-    const result = {};
+   const result = {};
+
     Object.keys(variables).forEach(key => {
-        const isSuffixed = usedKeys.some(uk => key.endsWith(`${uk.key}${uk.level}`));
+        const isSuffixed = allSuffixes.some(s => key.endsWith(s));
+        
         if (!isSuffixed) {
-            result[key] = JSON.parse(JSON.stringify(variables[key]));
+            const originalVar = variables[key];
+            const rootMatch = sortedContainers.find(c => c.level === 0 && c.key === key);
+            
+            if (rootMatch) {
+                result[key] = {
+                    type: "block",
+                    htmlContent: rootMatch.data.htmlContent,
+                    blockType: rootMatch.data.blockType 
+                };
+            } else {
+                result[key] = JSON.parse(JSON.stringify(originalVar));
+            }
         }
     });
-
-    const rootContainer = sortedContainers.find(c => c.level === 0);
-    if (rootContainer && result[rootContainer.key]) {
-        result[rootContainer.key] = {
-            ...result[rootContainer.key],
-            ...rootContainer.data
-        };
-    }
-
     return result;
+
 };
+//    const variables = preparedBlock.variables;
+//	const blockContainers = usedKeys.map(({ level, key }) => {
+//        const suffix = `${key}${level}`;
+//       	const blockData = {
+//        	blockType: variables[key] ? JSON.parse(JSON.stringify(variables[key].blockType || {})) : {}
+//    	};
+
+//        Object.keys(variables).forEach(fullKey => {
+//            if (fullKey.endsWith(suffix)) {
+//                const realVarName = fullKey.slice(0, -suffix.length);
+//                blockData.blockType[realVarName] = JSON.parse(JSON.stringify(variables[fullKey]));
+//            }
+//        });
+
+//        const contentMatch = contents.find(c => c.level === level && c.key === key);
+//        const templateHtml = contentMatch ? contentMatch.content.html : "";
+//		preparedBlock.css += "\n" + contentMatch.content.css;
+
+//        return { level, key, data: blockData, templateHtml };
+//    });
+
+//    const sortedContainers = [...blockContainers].sort((a, b) => b.level - a.level);
+
+//    sortedContainers.forEach(container => {
+//        const blockId = `${container.key}${container.level}`;
+//        const renderedHtml = scopeHtml(
+//            { html: container.templateHtml, blockType: container.key },
+//            blockId,
+//            container.data.blockType
+//        );
+
+//        container.data.htmlContent = renderedHtml;
+
+//        if (container.level > 0) {
+//            const parent = sortedContainers.find(p => 
+//                p.level === container.level - 1 && p.data.blockType.hasOwnProperty(container.key)
+//            );
+
+//            if (parent) {
+//                if (!parent.data.blockType[container.key]) {
+//                    parent.data.blockType[container.key] = {};
+//                }
+//                parent.data.blockType[container.key].htmlContent = renderedHtml;
+//            }
+//        }
+//    });
+
+//    const result = {};
+//    Object.keys(variables).forEach(key => {
+//        const isSuffixed = usedKeys.some(uk => key.endsWith(`${uk.key}${uk.level}`));
+//        if (!isSuffixed) {
+//            result[key] = JSON.parse(JSON.stringify(variables[key]));
+//        }
+//    });
+
+//    const rootContainer = sortedContainers.find(c => c.level === 0);
+//    if (rootContainer && result[rootContainer.key]) {
+//        result[rootContainer.key] = {
+//            ...result[rootContainer.key],
+//            ...rootContainer.data
+//        };
+//    }
+
+//    return result;
+//};
