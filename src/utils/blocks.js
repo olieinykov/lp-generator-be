@@ -154,6 +154,10 @@ Use exactly these variable names and structure. Format:
 - anchors: {"variableName": {"value": []}}
 - array: {"variableName": {"type": "array", "values": [{ ...each key from above list... }, ...]}}
 
+!!! IMPORTANT: 
+If a variable has type "block", you MUST NOT modify it, add content to it, or expand it. 
+Keep the "block" object exactly as provided in the structure below.
+
 =====================
 EXPECTED SHAPE (fill with real content, 3–5 items for arrays)
 =====================
@@ -609,6 +613,10 @@ function buildExpectedShape(variables) {
 			out[name] = { href: '...', label: '...' };
 		} else if (v?.type === 'anchors') {
 			out[name] = { value: [] };
+		} else if (v?.type === 'block') {
+			out[name] = {  
+                blockType: v.blockType || '...' 
+            };
 		} else {
 			out[name] = { value: '...' };
 		}
@@ -715,4 +723,138 @@ export const fillAnchors = (pages, targetPage = '') => {
 		return pages
 	}
 	
+};
+
+export const expandedDefinition = async (blockDef, level = 0, rootVariables = {}, currentParent = null, maxLevel = 5) => {
+    if (level > maxLevel) {
+        console.warn(`Reached max nesting level: ${maxLevel}. Stopping recursion.`);
+        return { newVariables: rootVariables, usedKeys: [] };
+    }
+	
+	if (level === 0) {
+        Object.assign(rootVariables, JSON.parse(JSON.stringify(blockDef.variables)));
+    }
+
+    const currentVars = blockDef.variables;
+    let allUsedKeys = [];
+	let allContents = [];
+
+    for (const [key, value] of Object.entries(currentVars)) {
+        if (value.type === "block") {
+            allUsedKeys.push({ level, key });
+            const childBlockInfo = await getBlockByType(value.blockType);
+            const childVars = childBlockInfo.definition.variables;
+
+			let thisBlockObject;
+            if (level === 0) {
+                thisBlockObject = rootVariables[key];
+            } else if (currentParent) {
+                thisBlockObject = currentParent[key];
+            }
+
+            if (thisBlockObject) {
+                thisBlockObject.blockType = {};
+            }
+
+			allContents.push({
+                level,
+                key,
+                content: {
+                    html: childBlockInfo.html,
+                    css: childBlockInfo.css
+                }
+            });
+
+            Object.entries(childVars).forEach(([childKey, childValue]) => {
+                if (childValue.type !== "block") {
+                    const flatName = `${childKey}${key}${level}`;
+                    rootVariables[flatName] = JSON.parse(JSON.stringify(childValue));
+                } else {
+                    if (thisBlockObject) {
+                        thisBlockObject.blockType[childKey] = {};
+                    }
+                }
+            });
+
+            const hasNestedBlocks = Object.values(childVars).some(v => v.type === "block");
+
+            if (hasNestedBlocks) {
+				console.log("IN NESTED BLOCK ==== ")
+				const nextParent = thisBlockObject ? thisBlockObject.blockType : null;
+                const nestedResult = await expandedDefinition(childBlockInfo.definition, level + 1, rootVariables, nextParent);
+				if (nestedResult.usedKeys.length > 0) {
+                    allUsedKeys = [...allUsedKeys, ...nestedResult.usedKeys];
+					allContents = [...allContents, ...nestedResult.contents];
+                }
+            }
+        }
+    }
+    return { newVariables: rootVariables, usedKeys: allUsedKeys, contents: allContents };
+};
+
+export const transformToStructuredBlocks = (preparedBlock, usedKeys, contents) => {
+    const variables = preparedBlock.variables;
+	const blockContainers = usedKeys.map(({ level, key }) => {
+        const suffix = `${key}${level}`;
+       	const blockData = {
+        	blockType: variables[key] ? JSON.parse(JSON.stringify(variables[key].blockType || {})) : {}
+    	};
+
+        Object.keys(variables).forEach(fullKey => {
+            if (fullKey.endsWith(suffix)) {
+                const realVarName = fullKey.slice(0, -suffix.length);
+                blockData.blockType[realVarName] = JSON.parse(JSON.stringify(variables[fullKey]));
+            }
+        });
+
+        const contentMatch = contents.find(c => c.level === level && c.key === key);
+        const templateHtml = contentMatch ? contentMatch.content.html : "";
+		preparedBlock.css += "\n" + contentMatch.content.css;
+
+        return { level, key, data: blockData, templateHtml };
+    });
+
+    const sortedContainers = [...blockContainers].sort((a, b) => b.level - a.level);
+
+    sortedContainers.forEach(container => {
+        const blockId = `${container.key}${container.level}`;
+        const renderedHtml = scopeHtml(
+            { html: container.templateHtml, blockType: container.key },
+            blockId,
+            container.data.blockType
+        );
+
+        container.data.htmlContent = renderedHtml;
+
+        if (container.level > 0) {
+            const parent = sortedContainers.find(p => 
+                p.level === container.level - 1 && p.data.blockType.hasOwnProperty(container.key)
+            );
+
+            if (parent) {
+                if (!parent.data.blockType[container.key]) {
+                    parent.data.blockType[container.key] = {};
+                }
+                parent.data.blockType[container.key].htmlContent = renderedHtml;
+            }
+        }
+    });
+
+    const result = {};
+    Object.keys(variables).forEach(key => {
+        const isSuffixed = usedKeys.some(uk => key.endsWith(`${uk.key}${uk.level}`));
+        if (!isSuffixed) {
+            result[key] = JSON.parse(JSON.stringify(variables[key]));
+        }
+    });
+
+    const rootContainer = sortedContainers.find(c => c.level === 0);
+    if (rootContainer && result[rootContainer.key]) {
+        result[rootContainer.key] = {
+            ...result[rootContainer.key],
+            ...rootContainer.data
+        };
+    }
+
+    return result;
 };

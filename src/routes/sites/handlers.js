@@ -7,10 +7,12 @@ import { PRICE_FOR_PROMPTS_OPENAI } from '../../config/constants.js';
 import slugify from 'slugify';
 import {
 	buildSitePages,
+	expandedDefinition,
 	fillAnchors,
 	getBlockByType,
 	prepareBlock,
 	prepareGlobalBlocks,
+	transformToStructuredBlocks,
 } from '../../utils/blocks.js';
 import { filteredZip, replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
 import { generateNginxConfig, generateSite, generateSitemapXml } from '../../utils/generator.js';
@@ -483,14 +485,18 @@ export const regenerateBlock = async (request, reply) => {
 			tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 			generatedBlock = preparedBlock;
 		} else {
+			const {newVariables: newVars, usedKeys, contents} = await expandedDefinition(block.definition);
+			const expandedBlock = {...block, definition: {variables: newVars} }
 			const preparedBlock = await prepareBlock(
-				block,
+				expandedBlock,
 				site.prompt || prompt,
 				site.country,
 				site.language,
 				null,
 				currentSiteZip,
 			);
+			const updatedPreparedBlock = transformToStructuredBlocks(preparedBlock, usedKeys, contents)
+			preparedBlock.variables = updatedPreparedBlock
 
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
 			tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;

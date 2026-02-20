@@ -15,6 +15,7 @@ const ALLOWED_KEYS = {
 	nav: ['type', 'value'],
 	anchor: ['type', 'href', 'label'],
 	anchors: ['type', 'value'],
+	block: ['type', 'blockType']
 };
 
 const ALLOWED_EXTENSIONS = ['.zip'];
@@ -93,6 +94,11 @@ function validateField(key, field) {
 			break;
 		case 'anchors':
 			if (!Array.isArray(field.value)) {
+				throw new Error(`Field "${key}" must have "value" as an array`);
+			}
+			break;
+		case 'block':
+			if (typeof field.blockType !== 'string') {
 				throw new Error(`Field "${key}" must have "value" as an array`);
 			}
 			break;
