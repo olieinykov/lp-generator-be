@@ -57,7 +57,7 @@ const processImages = async (content, variables, zip) => {
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
 			const { url, base64, cost } = await generateImageWithFal(value.href, zip);
 			content[key].href = url;
-			// content[key].href64 = base64;
+			 content[key].href64 = base64;
 			totalFalCost += cost;
 		}
 
@@ -316,7 +316,6 @@ export const prepareBlock = async (
 				null,
 				zip,
 			);
-
 		totalTokens = sumTokens(totalTokens, ownTokens);
 
 		return {
@@ -458,46 +457,113 @@ const scopeHtml = (block, blockId, variables) => {
 	}
 };
 
+const processRecursiveBlock = (rawBlock, blockId, isPreview) => {
+    if (!rawBlock) return { html: '', css: '' };
+
+    const block = rawBlock.block || rawBlock;
+    const hasError = rawBlock.hasError || block.hasError;
+    
+    if (hasError || !block.html) {
+        const type = rawBlock.blockType || block.blockType || 'unknown';
+        return {
+            html: `<div id="${blockId}">Failed to render ${type}</div>`,
+            css: ''
+        };
+    }
+
+    let accumulatedCss = '';
+    
+    if (block.css) {
+        accumulatedCss += scopeCss(block.css, blockId) + '\n';
+    }
+
+    let currentVariables = JSON.parse(JSON.stringify(block.variables || {}));
+
+    if (isPreview) {
+        currentVariables = replaceHrefWithHref64(currentVariables);
+    }
+
+    const defVariables = block.definition?.variables || {};
+
+    for (const [key, variableValue] of Object.entries(currentVariables)) {
+        const isBlockByDef = defVariables[key] && defVariables[key].type === 'block';
+        const isBlockByStructure = variableValue && typeof variableValue === 'object' && ('html' in variableValue) && ('css' in variableValue);
+
+        if (variableValue && (isBlockByDef || isBlockByStructure)) {
+            const actualNestedBlock = variableValue.block || variableValue;
+            
+            if (actualNestedBlock && actualNestedBlock.html) {
+                const nestedId = `${blockId}-${key}`;
+                const nestedResult = processRecursiveBlock(actualNestedBlock, nestedId, isPreview);
+
+                accumulatedCss += nestedResult.css;
+                currentVariables[key] = {
+                    ...variableValue,
+                    htmlContent: nestedResult.html
+                };
+            }
+        }
+    }
+
+    const html = scopeHtml(block, blockId, currentVariables);
+
+    return {
+        html,
+        css: accumulatedCss
+    };
+};
+
 export const buildPageHtml = (page, globalCss, language, country, seo = {}, isPreview = false) => {
-	const filledBlocks = page.blocks.map((block, blockIndex) => {
-		const id = `${block.blockType}-${blockIndex}`;
+    let fullPageCss = '';
+    
+    page.blocks.forEach((block, blockIndex) => {
+        const rootBlockId = `${block.blockType}-${blockIndex}`;
+        const prodResult = processRecursiveBlock(block, rootBlockId, false);
 
-		const originalVariables = block.variables;
-		const previewVariables = replaceHrefWithHref64(block.variables);
-		return {
-			...block,
-			scopedCss: scopeCss(block.css, id),
-			html: scopeHtml(block, id, originalVariables),
-			previewHtml: scopeHtml(block, id, previewVariables),
-		};
-	});
-	const blocksHtml = filledBlocks.map((b) => b.html).join('\n');
-	const blocksPreviewHtml = filledBlocks.map((b) => b.previewHtml).join('\n');
-	const blocksCss = filledBlocks.map((b) => b.scopedCss).join('\n');
-	const cssVariables = Object.entries(globalCss || {})
-		.map(([key, value]) => `${key}: ${value};`)
-		.join('\n    ');
+        fullPageCss += prodResult.css; 
+    });
+    
+    const processedBlocks = page.blocks.map((block, blockIndex) => {
+        const id = `${block.blockType}-${blockIndex}`;
+        
+        const prod = processRecursiveBlock(block, id, false);
+        const prev = processRecursiveBlock(block, id, true);
+        
+        return {
+            html: prod.html,
+            previewHtml: prev.html,
+            css: prod.css
+        };
+    });
 
-	return {
-		html: getHtmlPageTemplate({
-			seo,
-			page,
-			country,
-			language,
-			blocksCss,
-			blocksHtml,
-			cssVariables,
-		}),
-		previewHtml: getHtmlPageTemplate({
-			seo,
-			page,
-			country,
-			language,
-			blocksCss,
-			blocksHtml: blocksPreviewHtml,
-			cssVariables,
-		}),
-	};
+    const blocksHtml = processedBlocks.map(b => b.html).join('\n');
+    const blocksPreviewHtml = processedBlocks.map(b => b.previewHtml).join('\n');
+    const blocksCss = processedBlocks.map(b => b.css).join('\n');
+
+    const cssVariables = Object.entries(globalCss || {})
+        .map(([key, value]) => `${key}: ${value};`)
+        .join('\n    ');
+
+    return {
+        html: getHtmlPageTemplate({
+            seo,
+            page,
+            country,
+            language,
+            blocksCss,
+            blocksHtml,
+            cssVariables,
+        }),
+        previewHtml: getHtmlPageTemplate({
+            seo,
+            page,
+            country,
+            language,
+            blocksCss,
+            blocksHtml: blocksPreviewHtml,
+            cssVariables,
+        }),
+    };
 };
 
 const getHtmlPageTemplate = ({
@@ -564,15 +630,15 @@ export const buildSitePages = (pages, globalCss, language, country) => {
 		const pageHasErrors = page?.blocks?.some((block) => block.hasError);
 		const blocks = page?.blocks?.map((block, blockIndex) => {
 			return {
-				blockId: block.id || block.blockId,
+				blockId: block.id || block.block.id || block.blockId,
 				isGlobal: block.isGlobal,
 				blockType: block.blockType,
 				generationBlockId: `${block.blockType}-${blockIndex}`,
-				definition: block.definition,
-				variables: block.variables,
+				definition: block.definition || block.block.definition,
+				variables: block.variables || block.block.variables,
 				hasError: block?.hasError,
-				css: block.css,
-				html: block.html,
+				css: block.css || block.block.css,
+				html: block.html || block.block.html,
 			};
 		});
 
@@ -728,6 +794,7 @@ function buildExpectedShape(variables) {
 	return JSON.stringify(out, null, 2);
 }
 
+const getActualBlock = (b) => b.block || b;
 
 const getRandomAndRemove = (array, currentId, currentBlockIndex) => {
 	const filteredArray = array.filter(
@@ -741,6 +808,72 @@ const getRandomAndRemove = (array, currentId, currentBlockIndex) => {
 		item.block.id === selectedItem.block.id && item.blockIndex === selectedItem.blockIndex
 	));
 	return { updatedArray, selectedItem };
+}
+
+const fillAnchorsHelp = (page, currentFreeBlocks, rawNewBlock, blockIndexGlobal, allAnchors, startBlocksLength) => {
+    let freeBlocks = currentFreeBlocks;
+
+    const newBlock = getActualBlock(rawNewBlock);
+    if (!newBlock || !newBlock.definition || !newBlock.definition.variables) {
+        return freeBlocks;
+    }
+
+    const fillVars = (key, result) => {
+        if (!result || !result.selectedItem) return;
+        
+        const targetBlock = getActualBlock(result.selectedItem.block);
+        const href = `#${targetBlock.category}-${result.selectedItem.blockIndex}`;
+        
+        if (!newBlock.variables) newBlock.variables = {};
+        if (!newBlock.variables[key]) newBlock.variables[key] = {};
+        
+        const label = newBlock.variables[key].label || "Детальніше"; 
+        newBlock.variables[key].href = href;
+        
+        allAnchors.set(href, label);
+        freeBlocks = result.updatedArray;
+    }
+
+    Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
+        if (values.type === 'anchor') {
+            const isOnlyCurrentBlockLeft = freeBlocks.length === 1 && 
+                getActualBlock(freeBlocks[0].block).id === newBlock.id && 
+                freeBlocks[0].blockIndex === blockIndexGlobal;
+
+            if (startBlocksLength > 1 && (isOnlyCurrentBlockLeft || freeBlocks.length === 0)) {
+                freeBlocks = page.blocks
+                    .map((block, blockIndex) => ({
+                        block,
+                        blockIndex,
+                    }))
+                    .filter((blockInfo) => {
+                        const b = getActualBlock(blockInfo.block);
+                        return !blockInfo.block.hasError && b && b.category !== 'header' && b.category !== 'footer';
+                    });
+            }
+
+            let result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
+
+            if (!result.selectedItem && startBlocksLength === 1) {
+                if (newBlock.variables && newBlock.variables[key]) {
+                    newBlock.variables[key].href = "";
+                    newBlock.variables[key].label = "";
+                }
+                return;
+            }
+
+            fillVars(key, result);
+        }
+
+        if (values.type === "block") {
+            let nestedBlockRef = newBlock.variables && newBlock.variables[key];
+            if (nestedBlockRef) {
+                freeBlocks = fillAnchorsHelp(page, freeBlocks, nestedBlockRef, blockIndexGlobal, allAnchors, startBlocksLength);
+            }
+        }
+    });
+    
+    return freeBlocks;
 }
 
 export const fillAnchors = (pages, targetPage = '') => {
@@ -757,52 +890,16 @@ export const fillAnchors = (pages, targetPage = '') => {
 					}))
 					.filter(
 						(blockInfo) =>
-							blockInfo.block.category !== 'header' && blockInfo.block.category !== 'footer',
+							!blockInfo.block.hasError && blockInfo.block.category !== 'header' && blockInfo.block.category !== 'footer',
 					);
 				const startBlocksLength = freeBlocks.length;
 				const allAnchors = new Map();
 
-				const fillVars = (newBlock, key, result) => {
-						const href = `#${result.selectedItem.block.category}-${result.selectedItem.blockIndex}`;
-						const label = newBlock.variables[key].label;
-						newBlock.variables[key].href = href;
-						allAnchors.set(href, label);
-						freeBlocks = result.updatedArray;
-				}
-
 				const updatedBlocks = page.blocks.map((block, blockIndexGlobal) => {
 					let newBlock = JSON.parse(JSON.stringify(block));
 
-					if (startBlocksLength >= 1 && newBlock.definition.variables) {
-						Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
-							if (values.type === 'anchor') {
-								const isOnlyCurrentBlockLeft = freeBlocks.length === 1 && 
-									freeBlocks[0].block.id === newBlock.id && 
-									freeBlocks[0].blockIndex === blockIndexGlobal;
-								if(startBlocksLength > 1 && (isOnlyCurrentBlockLeft || freeBlocks.length === 0)){
-										freeBlocks = page.blocks
-										.map((block, blockIndex) => ({
-											block,
-											blockIndex,
-										}))
-										.filter(
-											(blockInfo) =>
-												blockInfo.block.category !== 'header' &&
-												blockInfo.block.category !== 'footer',
-										);
-								}
-
-								let result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
-
-								if(!result.selectedItem && startBlocksLength === 1){
-									newBlock.variables[key].href = "";
-									newBlock.variables[key].label = "";
-									return
-								}
-
-								fillVars(newBlock, key, result);
-							}
-						});
+					if (startBlocksLength >= 1) {
+						fillAnchorsHelp(page, freeBlocks, newBlock, blockIndexGlobal, allAnchors, startBlocksLength)
 					} 
 					return newBlock;
 				});
@@ -812,13 +909,18 @@ export const fillAnchors = (pages, targetPage = '') => {
 					label,
 				}));
 
-				updatedBlocks.forEach((block) => {
-					Object.entries(block.definition.variables).forEach(([key, val]) => {
-						if (val.type === 'anchors') {
-							block.variables[key].value = uniqueAnchorsList;
-						}
-					});
-				});
+				updatedBlocks.forEach((rawBlock) => {
+                const block = getActualBlock(rawBlock);
+                if (block && block.definition && block.definition.variables) {
+                    Object.entries(block.definition.variables).forEach(([key, val]) => {
+                        if (val.type === 'anchors') {
+                            if (!block.variables) block.variables = {};
+                            if (!block.variables[key]) block.variables[key] = {};
+                            block.variables[key].value = uniqueAnchorsList;
+                        }
+                    });
+                }
+            });
 
 				return { ...page, blocks: updatedBlocks };
 			});
@@ -826,5 +928,4 @@ export const fillAnchors = (pages, targetPage = '') => {
 		console.error("Error in fillAnchors function: ", err)
 		return pages
 	}
-	
 };

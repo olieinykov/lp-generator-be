@@ -12,7 +12,7 @@ import { PRICE_FOR_PROMPTS_OPENAI } from '../config/constants.js';
 import dayjs from 'dayjs';
 import { generatePagesWithAI } from './pages.js';
 
-async function resolveDefinition(block, visited = new Set()) {
+export async function resolveDefinition(block, visited = new Set()) {
 	const blockId = block.id;
 
 	if (visited.has(blockId)) {
@@ -105,7 +105,6 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 					} else {
 						const block = await getBlockByType(blockDef.type);
 						const nestedBlock = await resolveDefinition(block);
-
 						const preparedBlock = await prepareBlock(
 							nestedBlock,
 							prompt,
@@ -114,7 +113,6 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 							null,
 							zip,
 						);
-
 						tokens.totalPromptTokens += preparedBlock.tokens.promptTokens;
 						tokens.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 						tokens.totalTokens += preparedBlock.tokens.totalTokens;
