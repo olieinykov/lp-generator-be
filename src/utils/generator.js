@@ -12,6 +12,44 @@ import { PRICE_FOR_PROMPTS_OPENAI } from '../config/constants.js';
 import dayjs from 'dayjs';
 import { generatePagesWithAI } from './pages.js';
 
+async function resolveDefinition(block, visited = new Set()) {
+	const blockId = block.id;
+
+	if (visited.has(blockId)) {
+		return block;
+	}
+
+	visited.add(blockId);
+
+	const resolvedBlock = {
+		...block,
+		definition: {
+			...block.definition,
+			variables: { ...block.definition.variables },
+		},
+	};
+
+	for (const key in resolvedBlock.definition.variables) {
+		const variable = resolvedBlock.definition.variables[key];
+
+		if (variable.type === "block") {
+			const fetchedBlock = await getBlockByType(variable.blockType);
+
+			const nestedResolvedBlock = await resolveDefinition(
+				fetchedBlock,
+				visited
+			);
+
+			resolvedBlock.definition.variables[key] = {
+				...variable,
+				block: nestedResolvedBlock,
+			};
+		}
+	}
+
+	return resolvedBlock;
+}
+
 export const generateSite = async ({ currentTokens, template, prompt, country, language, zip }) => {
 	const tokensInfo = {
 		totalPromptTokens: currentTokens.totalPromptTokens ?? 0,
@@ -66,8 +104,10 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 						};
 					} else {
 						const block = await getBlockByType(blockDef.type);
+						const nestedBlock = await resolveDefinition(block);
+
 						const preparedBlock = await prepareBlock(
-							block,
+							nestedBlock,
 							prompt,
 							country,
 							language,
@@ -83,7 +123,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 						return {
 							hasError: false,
 							...baseInfo,
-							...preparedBlock,
+							block: preparedBlock,
 						};
 					}
 				} catch (error) {
@@ -108,6 +148,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		}, []);
 
 		return {
+			generatedBlocks,
 			pages: populatedPages,
 			tokens,
 		};

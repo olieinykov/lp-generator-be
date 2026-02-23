@@ -57,7 +57,7 @@ const processImages = async (content, variables, zip) => {
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
 			const { url, base64, cost } = await generateImageWithFal(value.href, zip);
 			content[key].href = url;
-			content[key].href64 = base64;
+			// content[key].href64 = base64;
 			totalFalCost += cost;
 		}
 
@@ -198,24 +198,136 @@ Return ONLY valid JSON. All text in ${language}. No empty strings.
 	];
 };
 
-export const prepareBlock = async (block, prompt, country, language, navigation = null, zip) => {
+// export const prepareBlock = async (block, prompt, country, language, navigation = null, zip) => {
+// 	try {
+// 		if (block.hasError) {
+// 			throw new Error(block.error);
+// 		}
+//
+// 		let preparedVariables = {};
+//
+// 		for (const key in block.definition.variables) {
+// 			const variable = block.definition.variables[key];
+//
+// 			if (variable.type === "block" && variable.block) {
+// 				const preparedNestedBlock = await prepareBlock(
+// 					variable.block,
+// 					prompt,
+// 					country,
+// 					language,
+// 					navigation,
+// 					zip,
+// 				);
+//
+// 				console.log("Handle NESTING content", preparedNestedBlock)
+//
+// 				preparedVariables[key] = preparedNestedBlock;
+// 			}
+// 		}
+//
+// 		const [aiContent, tokens] = await generateBlockContent(
+// 			block.definition.variables,
+// 			block.category,
+// 			prompt,
+// 			country,
+// 			language,
+// 			null,
+// 			zip,
+// 		);
+//
+// 		const variables = {
+// 			...aiContent,
+// 			...preparedVariables,
+// 			...(navigation ? { navigation } : {}),
+// 		};
+//
+// 		return {
+// 			...block,
+// 			variables,
+// 			tokens,
+// 		};
+// 	} catch (error) {
+// 		return {
+// 			...block,
+// 			hasError: true,
+// 			error: error?.message,
+// 		};
+// 	}
+// };
+
+const emptyTokens = () => ({
+	promptTokens: 0,
+	completionTokens: 0,
+	totalTokens: 0,
+	totalFalCost: 0,
+});
+
+const sumTokens = (a = emptyTokens(), b = emptyTokens()) => ({
+	promptTokens: a.promptTokens + b.promptTokens,
+	completionTokens: a.completionTokens + b.completionTokens,
+	totalTokens: a.totalTokens + b.totalTokens,
+	totalFalCost: a.totalFalCost + b.totalFalCost,
+});
+
+export const prepareBlock = async (
+	block,
+	prompt,
+	country,
+	language,
+	navigation = null,
+	zip,
+) => {
 	try {
 		if (block.hasError) {
 			throw new Error(block.error);
 		}
-		const [aiContent, tokens] = await generateBlockContent(
-			block.definition.variables,
-			block.category,
-			prompt,
-			country,
-			language,
-			null,
-			zip,
-		);
 
-		const variables = navigation ? { ...aiContent, navigation } : aiContent;
+		let preparedVariables = {};
+		let primitiveVariables = {};
+		let totalTokens = emptyTokens();
 
-		return { ...block, variables, tokens };
+		for (const key in block.definition.variables) {
+			const variable = block.definition.variables[key];
+
+			if (variable.type === "block" && variable.block) {
+				const preparedNestedBlock = await prepareBlock(
+					variable.block,
+					prompt,
+					country,
+					language,
+					navigation,
+					zip,
+				);
+
+				preparedVariables[key] = preparedNestedBlock;
+				totalTokens = sumTokens(totalTokens, preparedNestedBlock.tokens);
+			} else {
+				primitiveVariables[key] = variable;
+			}
+		}
+
+		const [aiContent, ownTokens = emptyTokens()] =
+			await generateBlockContent(
+				primitiveVariables,
+				block.category,
+				prompt,
+				country,
+				language,
+				null,
+				zip,
+			);
+
+		totalTokens = sumTokens(totalTokens, ownTokens);
+
+		return {
+			...block,
+			variables: {
+				...aiContent,
+				...preparedVariables,
+				...(navigation ? { navigation } : {}),
+			},
+			tokens: totalTokens,
+		};
 	} catch (error) {
 		return {
 			...block,
