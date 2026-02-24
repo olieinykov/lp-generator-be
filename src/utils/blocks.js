@@ -606,15 +606,15 @@ export const buildSitePages = (pages, globalCss, language, country) => {
 		const pageHasErrors = page?.blocks?.some((block) => block.hasError);
 		const blocks = page?.blocks?.map((block, blockIndex) => {
 			return {
-				blockId: block?.id || block?.block?.id || block?.blockId,
+				blockId: block?.id || block?.blockId,
 				isGlobal: block.isGlobal,
 				blockType: block.blockType,
 				generationBlockId: `${block.blockType}-${blockIndex}`,
-				definition: block?.definition || block?.block?.definition,
-				variables: block?.variables || block?.block?.variables,
+				definition: block?.definition,
+				variables: block?.variables,
 				hasError: block?.hasError,
-				css: block?.css || block?.block?.css,
-				html: block?.html || block?.block?.html,
+				css: block?.css,
+				html: block?.html,
 			};
 		});
 
