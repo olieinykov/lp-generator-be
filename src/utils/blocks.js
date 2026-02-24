@@ -57,7 +57,7 @@ const processImages = async (content, variables, zip) => {
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
 			const { url, base64, cost } = await generateImageWithFal(value.href, zip);
 			content[key].href = url;
-			 content[key].href64 = base64;
+			content[key].href64 = base64;
 			totalFalCost += cost;
 		}
 
@@ -457,113 +457,89 @@ const scopeHtml = (block, blockId, variables) => {
 	}
 };
 
-const processRecursiveBlock = (rawBlock, blockId, isPreview) => {
-    if (!rawBlock) return { html: '', css: '' };
+const childrenBlocksCollection = (blockInfo, blockId, rootEl = "", isPreview = false) => {
+    if (!blockInfo) return { html: "", css: "", variables: {} };
+    let accumulatedCss = "";
+    let updatedVars = blockInfo.variables ? { ...blockInfo.variables } : {};
 
-    const block = rawBlock.block || rawBlock;
-    const hasError = rawBlock.hasError || block.hasError;
-    
-    if (hasError || !block.html) {
-        const type = rawBlock.blockType || block.blockType || 'unknown';
-        return {
-            html: `<div id="${blockId}">Failed to render ${type}</div>`,
-            css: ''
-        };
-    }
+    Object.entries(blockInfo.definition.variables).forEach(([key, value], index) => {
+            if (value.type === "block" && value.block) {
+                const category = value.block.category;
+                const childId = `${category}-${rootEl ? `${rootEl}-` : ``}${key}-${index}`;
 
-    let accumulatedCss = '';
-    
-    if (block.css) {
-        accumulatedCss += scopeCss(block.css, blockId) + '\n';
-    }
+				const childData = updatedVars[key];
+            
+            	const childVars = childData?.block ? childData.block : childData;
 
-    let currentVariables = JSON.parse(JSON.stringify(block.variables || {}));
+	            const childBlockInfo = childVars 
+    	            ? { ...value.block, ...childVars } 
+        	        : value.block;
+
+                const { html, css } = childrenBlocksCollection(childBlockInfo, childId, key, isPreview);
+                updatedVars[key] = {
+                    ...(updatedVars[key] || {}),
+                    htmlContent: html
+                };
+                accumulatedCss += css + "\n";
+            } 
+    });
 
     if (isPreview) {
-        currentVariables = replaceHrefWithHref64(currentVariables);
+        updatedVars = replaceHrefWithHref64(updatedVars);
     }
 
-    const defVariables = block.definition?.variables || {};
-
-    for (const [key, variableValue] of Object.entries(currentVariables)) {
-        const isBlockByDef = defVariables[key] && defVariables[key].type === 'block';
-        const isBlockByStructure = variableValue && typeof variableValue === 'object' && ('html' in variableValue) && ('css' in variableValue);
-
-        if (variableValue && (isBlockByDef || isBlockByStructure)) {
-            const actualNestedBlock = variableValue.block || variableValue;
-            
-            if (actualNestedBlock && actualNestedBlock.html) {
-                const nestedId = `${blockId}-${key}`;
-                const nestedResult = processRecursiveBlock(actualNestedBlock, nestedId, isPreview);
-
-                accumulatedCss += nestedResult.css;
-                currentVariables[key] = {
-                    ...variableValue,
-                    htmlContent: nestedResult.html
-                };
-            }
-        }
+    const resultHtml = scopeHtml(blockInfo, blockId, updatedVars);
+    
+    if (blockInfo.css) {
+        accumulatedCss += scopeCss(blockInfo.css, blockId) + "\n";
     }
-
-    const html = scopeHtml(block, blockId, currentVariables);
 
     return {
-        html,
-        css: accumulatedCss
+        html: resultHtml,
+        css: accumulatedCss,
+        updatedVars
     };
 };
 
 export const buildPageHtml = (page, globalCss, language, country, seo = {}, isPreview = false) => {
-    let fullPageCss = '';
-    
-    page.blocks.forEach((block, blockIndex) => {
-        const rootBlockId = `${block.blockType}-${blockIndex}`;
-        const prodResult = processRecursiveBlock(block, rootBlockId, false);
+	const filledBlocks = page.blocks.map((block, blockIndex) => {
+		const id = `${block.blockType}-${blockIndex}`;
+		const originalVariables = childrenBlocksCollection(block, id, "");
+		const previewVariables = childrenBlocksCollection(block, id, "", true);
+		return {
+			...block,
+			scopedCss: originalVariables.css,
+			html: originalVariables.html,
+			previewHtml: previewVariables.html,
+		};
+	});
+	const blocksHtml = filledBlocks.map((b) => b.html).join('\n');
+	const blocksPreviewHtml = filledBlocks.map((b) => b.previewHtml).join('\n');
+	const blocksCss = filledBlocks.map((b) => b.scopedCss).join('\n');
+	const cssVariables = Object.entries(globalCss || {})
+		.map(([key, value]) => `${key}: ${value};`)
+		.join('\n    ');
 
-        fullPageCss += prodResult.css; 
-    });
-    
-    const processedBlocks = page.blocks.map((block, blockIndex) => {
-        const id = `${block.blockType}-${blockIndex}`;
-        
-        const prod = processRecursiveBlock(block, id, false);
-        const prev = processRecursiveBlock(block, id, true);
-        
-        return {
-            html: prod.html,
-            previewHtml: prev.html,
-            css: prod.css
-        };
-    });
-
-    const blocksHtml = processedBlocks.map(b => b.html).join('\n');
-    const blocksPreviewHtml = processedBlocks.map(b => b.previewHtml).join('\n');
-    const blocksCss = processedBlocks.map(b => b.css).join('\n');
-
-    const cssVariables = Object.entries(globalCss || {})
-        .map(([key, value]) => `${key}: ${value};`)
-        .join('\n    ');
-
-    return {
-        html: getHtmlPageTemplate({
-            seo,
-            page,
-            country,
-            language,
-            blocksCss,
-            blocksHtml,
-            cssVariables,
-        }),
-        previewHtml: getHtmlPageTemplate({
-            seo,
-            page,
-            country,
-            language,
-            blocksCss,
-            blocksHtml: blocksPreviewHtml,
-            cssVariables,
-        }),
-    };
+	return {
+		html: getHtmlPageTemplate({
+			seo,
+			page,
+			country,
+			language,
+			blocksCss,
+			blocksHtml,
+			cssVariables,
+		}),
+		previewHtml: getHtmlPageTemplate({
+			seo,
+			page,
+			country,
+			language,
+			blocksCss,
+			blocksHtml: blocksPreviewHtml,
+			cssVariables,
+		}),
+	};
 };
 
 const getHtmlPageTemplate = ({
@@ -630,15 +606,15 @@ export const buildSitePages = (pages, globalCss, language, country) => {
 		const pageHasErrors = page?.blocks?.some((block) => block.hasError);
 		const blocks = page?.blocks?.map((block, blockIndex) => {
 			return {
-				blockId: block.id || block.block.id || block.blockId,
+				blockId: block?.id || block?.block?.id || block?.blockId,
 				isGlobal: block.isGlobal,
 				blockType: block.blockType,
 				generationBlockId: `${block.blockType}-${blockIndex}`,
-				definition: block.definition || block.block.definition,
-				variables: block.variables || block.block.variables,
+				definition: block?.definition || block?.block?.definition,
+				variables: block?.variables || block?.block?.variables,
 				hasError: block?.hasError,
-				css: block.css || block.block.css,
-				html: block.html || block.block.html,
+				css: block?.css || block?.block?.css,
+				html: block?.html || block?.block?.html,
 			};
 		});
 
@@ -794,8 +770,6 @@ function buildExpectedShape(variables) {
 	return JSON.stringify(out, null, 2);
 }
 
-const getActualBlock = (b) => b.block || b;
-
 const getRandomAndRemove = (array, currentId, currentBlockIndex) => {
 	const filteredArray = array.filter(
 		(item) => item.block.id !== currentId || item.blockIndex !== currentBlockIndex,
@@ -813,7 +787,7 @@ const getRandomAndRemove = (array, currentId, currentBlockIndex) => {
 const fillAnchorsHelp = (page, currentFreeBlocks, rawNewBlock, blockIndexGlobal, allAnchors, startBlocksLength) => {
     let freeBlocks = currentFreeBlocks;
 
-    const newBlock = getActualBlock(rawNewBlock);
+    const newBlock = rawNewBlock;
     if (!newBlock || !newBlock.definition || !newBlock.definition.variables) {
         return freeBlocks;
     }
@@ -821,7 +795,7 @@ const fillAnchorsHelp = (page, currentFreeBlocks, rawNewBlock, blockIndexGlobal,
     const fillVars = (key, result) => {
         if (!result || !result.selectedItem) return;
         
-        const targetBlock = getActualBlock(result.selectedItem.block);
+        const targetBlock = result.selectedItem.block;
         const href = `#${targetBlock.category}-${result.selectedItem.blockIndex}`;
         
         if (!newBlock.variables) newBlock.variables = {};
@@ -837,7 +811,7 @@ const fillAnchorsHelp = (page, currentFreeBlocks, rawNewBlock, blockIndexGlobal,
     Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
         if (values.type === 'anchor') {
             const isOnlyCurrentBlockLeft = freeBlocks.length === 1 && 
-                getActualBlock(freeBlocks[0].block).id === newBlock.id && 
+                freeBlocks[0].block.id === newBlock.id && 
                 freeBlocks[0].blockIndex === blockIndexGlobal;
 
             if (startBlocksLength > 1 && (isOnlyCurrentBlockLeft || freeBlocks.length === 0)) {
@@ -847,7 +821,7 @@ const fillAnchorsHelp = (page, currentFreeBlocks, rawNewBlock, blockIndexGlobal,
                         blockIndex,
                     }))
                     .filter((blockInfo) => {
-                        const b = getActualBlock(blockInfo.block);
+                        const b = blockInfo.block;
                         return !blockInfo.block.hasError && b && b.category !== 'header' && b.category !== 'footer';
                     });
             }
@@ -910,7 +884,7 @@ export const fillAnchors = (pages, targetPage = '') => {
 				}));
 
 				updatedBlocks.forEach((rawBlock) => {
-                const block = getActualBlock(rawBlock);
+                const block = rawBlock;
                 if (block && block.definition && block.definition.variables) {
                     Object.entries(block.definition.variables).forEach(([key, val]) => {
                         if (val.type === 'anchors') {

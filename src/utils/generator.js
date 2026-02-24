@@ -113,6 +113,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 							null,
 							zip,
 						);
+				
 						tokens.totalPromptTokens += preparedBlock.tokens.promptTokens;
 						tokens.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 						tokens.totalTokens += preparedBlock.tokens.totalTokens;
@@ -121,7 +122,7 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 						return {
 							hasError: false,
 							...baseInfo,
-							block: preparedBlock,
+							...preparedBlock,
 						};
 					}
 				} catch (error) {
