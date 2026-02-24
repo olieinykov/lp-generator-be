@@ -801,7 +801,7 @@ const fillAnchorsHelp = (page, currentFreeBlocks, rawNewBlock, blockIndexGlobal,
         if (!newBlock.variables) newBlock.variables = {};
         if (!newBlock.variables[key]) newBlock.variables[key] = {};
         
-        const label = newBlock.variables[key].label || "Детальніше"; 
+        const label = newBlock.variables[key].label; 
         newBlock.variables[key].href = href;
         
         allAnchors.set(href, label);
@@ -827,14 +827,6 @@ const fillAnchorsHelp = (page, currentFreeBlocks, rawNewBlock, blockIndexGlobal,
             }
 
             let result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
-
-            if (!result.selectedItem && startBlocksLength === 1) {
-                if (newBlock.variables && newBlock.variables[key]) {
-                    newBlock.variables[key].href = "";
-                    newBlock.variables[key].label = "";
-                }
-                return;
-            }
 
             fillVars(key, result);
         }
