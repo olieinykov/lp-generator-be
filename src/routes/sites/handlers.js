@@ -495,15 +495,13 @@ export const regenerateBlock = async (request, reply) => {
 				null,
 				currentSiteZip,
 			);
-			const updatedPreparedBlock = transformToStructuredBlocks(preparedBlock, usedKeys, contents)
-			preparedBlock.variables = updatedPreparedBlock
 
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
 			tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 			tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
 			tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 
-			generatedBlock = preparedBlock;
+			generatedBlock = {...preparedBlock, additionalInfo: {usedKeys, contents}};
 		}
 
 		const updatedPages = site.siteConfigDetailed?.pages?.map((page) => {
@@ -532,6 +530,7 @@ export const regenerateBlock = async (request, reply) => {
 							hasError: false,
 							css: generatedBlock.css,
 							html: generatedBlock.html,
+							additionalInfo: generatedBlock.additionalInfo
 						};
 					}
 					
@@ -539,15 +538,20 @@ export const regenerateBlock = async (request, reply) => {
 							...block,
 							id: block.blockId,
 							category: block.blockType,
+							additionalInfo: {
+								usedKeys: [],
+								contents: []
+							}
 						};
 				}),
 			};
 		});
 
 		const updatedPagesWithAnchor = fillAnchors(updatedPages, isBlockGlobal ? '' : pageName);
+		const blocksCollection = transformToStructuredBlocks(updatedPagesWithAnchor);
 
 		const sitePages = buildSitePages(
-			updatedPagesWithAnchor,
+			blocksCollection,
 			site.siteConfigDetailed.generatedTheme,
 			site.language,
 			site.country,

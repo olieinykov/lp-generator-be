@@ -78,8 +78,6 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 							null,
 							zip,
 						);
-						const updatedPreparedBlock = transformToStructuredBlocks(preparedBlock, usedKeys, contents)
-						preparedBlock.variables = updatedPreparedBlock
 						tokens.totalPromptTokens += preparedBlock.tokens.promptTokens;
 						tokens.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 						tokens.totalTokens += preparedBlock.tokens.totalTokens;
@@ -89,6 +87,10 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 							hasError: false,
 							...baseInfo,
 							...preparedBlock,
+							additionalInfo: {
+								usedKeys,
+								contents
+							}
 						};
 					}
 				} catch (error) {
@@ -162,9 +164,9 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 	const openAiOutputPrice =
 		tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
 	const openAiTotalPrice = openAiInputPrice + openAiOutputPrice;
-
 	const updatedPagesWithAnchors = fillAnchors(pages);
-	const sitePages = buildSitePages(updatedPagesWithAnchors, globalCss, language, country);
+	const blocksCollection = transformToStructuredBlocks(updatedPagesWithAnchors);
+	const sitePages = buildSitePages(blocksCollection, globalCss, language, country);
 	const siteConfigDetailed = {
 		pages: sitePages?.map((page) => ({
 			title: page.title,
