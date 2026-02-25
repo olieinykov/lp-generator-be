@@ -7,10 +7,12 @@ import { PRICE_FOR_PROMPTS_OPENAI } from '../../config/constants.js';
 import slugify from 'slugify';
 import {
 	buildSitePages,
+	expandedDefinition,
 	fillAnchors,
 	getBlockByType,
 	prepareBlock,
 	prepareGlobalBlocks,
+	transformToStructuredBlocks,
 } from '../../utils/blocks.js';
 import { filteredZip, replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
 import { generateNginxConfig, generateSite, generateSitemapXml } from '../../utils/generator.js';
@@ -483,8 +485,10 @@ export const regenerateBlock = async (request, reply) => {
 			tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 			generatedBlock = preparedBlock;
 		} else {
+			const {newVariables: newVars, usedKeys, contents} = await expandedDefinition(block.definition);
+			const expandedBlock = {...block, definition: {variables: newVars} }
 			const preparedBlock = await prepareBlock(
-				block,
+				expandedBlock,
 				site.prompt || prompt,
 				site.country,
 				site.language,
@@ -497,7 +501,7 @@ export const regenerateBlock = async (request, reply) => {
 			tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
 			tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 
-			generatedBlock = preparedBlock;
+			generatedBlock = {...preparedBlock, additionalInfo: {usedKeys, contents}};
 		}
 
 		const updatedPages = site.siteConfigDetailed?.pages?.map((page) => {
@@ -526,6 +530,7 @@ export const regenerateBlock = async (request, reply) => {
 							hasError: false,
 							css: generatedBlock.css,
 							html: generatedBlock.html,
+							additionalInfo: generatedBlock.additionalInfo
 						};
 					}
 					
@@ -533,15 +538,20 @@ export const regenerateBlock = async (request, reply) => {
 							...block,
 							id: block.blockId,
 							category: block.blockType,
+							additionalInfo: {
+								usedKeys: [],
+								contents: []
+							}
 						};
 				}),
 			};
 		});
 
 		const updatedPagesWithAnchor = fillAnchors(updatedPages, isBlockGlobal ? '' : pageName);
+		const blocksCollection = transformToStructuredBlocks(updatedPagesWithAnchor);
 
 		const sitePages = buildSitePages(
-			updatedPagesWithAnchor,
+			blocksCollection,
 			site.siteConfigDetailed.generatedTheme,
 			site.language,
 			site.country,

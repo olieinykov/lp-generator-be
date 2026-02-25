@@ -1,5 +1,6 @@
 import {
 	buildSitePages,
+	expandedDefinition,
 	fillAnchors,
 	flatPageBlocks,
 	generateTheme,
@@ -7,6 +8,7 @@ import {
 	getBlocks,
 	prepareBlock,
 	prepareGlobalBlocks,
+	transformToStructuredBlocks,
 } from './blocks.js';
 import { PRICE_FOR_PROMPTS_OPENAI } from '../config/constants.js';
 import dayjs from 'dayjs';
@@ -66,15 +68,16 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 						};
 					} else {
 						const block = await getBlockByType(blockDef.type);
+						const {newVariables: newVars, usedKeys, contents} = await expandedDefinition(block.definition);
+						const expandedBlock = {...block, definition: {variables: newVars} }
 						const preparedBlock = await prepareBlock(
-							block,
+							expandedBlock,
 							prompt,
 							country,
 							language,
 							null,
 							zip,
 						);
-
 						tokens.totalPromptTokens += preparedBlock.tokens.promptTokens;
 						tokens.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 						tokens.totalTokens += preparedBlock.tokens.totalTokens;
@@ -84,6 +87,10 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 							hasError: false,
 							...baseInfo,
 							...preparedBlock,
+							additionalInfo: {
+								usedKeys,
+								contents
+							}
 						};
 					}
 				} catch (error) {
@@ -157,9 +164,9 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 	const openAiOutputPrice =
 		tokensInfo.totalCompletionTokens * (PRICE_FOR_PROMPTS_OPENAI.output / 1000000);
 	const openAiTotalPrice = openAiInputPrice + openAiOutputPrice;
-
 	const updatedPagesWithAnchors = fillAnchors(pages);
-	const sitePages = buildSitePages(updatedPagesWithAnchors, globalCss, language, country);
+	const blocksCollection = transformToStructuredBlocks(updatedPagesWithAnchors);
+	const sitePages = buildSitePages(blocksCollection, globalCss, language, country);
 	const siteConfigDetailed = {
 		pages: sitePages?.map((page) => ({
 			title: page.title,

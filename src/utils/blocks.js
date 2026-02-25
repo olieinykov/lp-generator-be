@@ -154,6 +154,10 @@ Use exactly these variable names and structure. Format:
 - anchors: {"variableName": {"value": []}}
 - array: {"variableName": {"type": "array", "values": [{ ...each key from above list... }, ...]}}
 
+!!! IMPORTANT: 
+If a variable has type "block", you MUST NOT modify it, add content to it, or expand it. 
+Keep the "block" object exactly as provided in the structure below.
+
 =====================
 EXPECTED SHAPE (fill with real content, 3–5 items for arrays)
 =====================
@@ -609,6 +613,10 @@ function buildExpectedShape(variables) {
 			out[name] = { href: '...', label: '...' };
 		} else if (v?.type === 'anchors') {
 			out[name] = { value: [] };
+		} else if (v?.type === 'block') {
+			out[name] = {  
+                blockType: v.blockType || '...' 
+            };
 		} else {
 			out[name] = { value: '...' };
 		}
@@ -631,15 +639,8 @@ const getRandomAndRemove = (array, currentId, currentBlockIndex) => {
 	return { updatedArray, selectedItem };
 }
 
-export const fillAnchors = (pages, targetPage = '') => {
-	try{
-		return pages.map((page) => {
-				if (targetPage && page.filename !== targetPage) {
-					return page;
-				}
-
-				let freeBlocks = page.blocks
-					.map((block, blockIndex) => ({
+const getFreeBlocks = (blocks) => {
+	return blocks.map((block, blockIndex) => ({
 						block,
 						blockIndex,
 					}))
@@ -647,6 +648,16 @@ export const fillAnchors = (pages, targetPage = '') => {
 						(blockInfo) =>
 							blockInfo.block.category !== 'header' && blockInfo.block.category !== 'footer',
 					);
+} 
+
+export const fillAnchors = (pages, targetPage = '') => {
+	try{
+		return pages.map((page) => {
+				if (targetPage && page.filename !== targetPage) {
+					return page;
+				}
+
+				let freeBlocks = getFreeBlocks(page.blocks)
 				const startBlocksLength = freeBlocks.length;
 				const allAnchors = new Map();
 
@@ -664,20 +675,14 @@ export const fillAnchors = (pages, targetPage = '') => {
 					if (startBlocksLength >= 1 && newBlock.definition.variables) {
 						Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
 							if (values.type === 'anchor') {
+								if (!newBlock.variables[key]) {
+                                	return;
+                            	}
 								const isOnlyCurrentBlockLeft = freeBlocks.length === 1 && 
 									freeBlocks[0].block.id === newBlock.id && 
 									freeBlocks[0].blockIndex === blockIndexGlobal;
 								if(startBlocksLength > 1 && (isOnlyCurrentBlockLeft || freeBlocks.length === 0)){
-										freeBlocks = page.blocks
-										.map((block, blockIndex) => ({
-											block,
-											blockIndex,
-										}))
-										.filter(
-											(blockInfo) =>
-												blockInfo.block.category !== 'header' &&
-												blockInfo.block.category !== 'footer',
-										);
+										freeBlocks = getFreeBlocks(page.blocks);
 								}
 
 								let result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
@@ -715,4 +720,196 @@ export const fillAnchors = (pages, targetPage = '') => {
 		return pages
 	}
 	
+};
+
+export const expandedDefinition = async (blockDef, level = 0, rootVariables = {}, currentParent = null, maxLevel = 5, rootKey = "") => {
+    if (level > maxLevel) return { newVariables: rootVariables, usedKeys: [], contents: [] };
+
+    if (level === 0) {
+        Object.assign(rootVariables, JSON.parse(JSON.stringify(blockDef.variables || {})));
+    }
+
+    let allUsedKeys = [];
+    let allContents = [];
+
+    const currentVars = blockDef.variables || {};
+    const entries = Object.entries(currentVars).filter(([_, v]) => v.type === "block");
+
+    for (const [key, value] of entries) {
+		const currentRootKey = level === 0 ? key : rootKey;
+
+        allUsedKeys.push({ level, key, rootKey: currentRootKey });
+        const childBlockInfo = await getBlockByType(value.blockType);
+        
+        if (!childBlockInfo) {
+            console.warn(`[Warning] There no block for type: ${value.blockType}`);
+            continue;
+        }
+
+        let targetRef = (level === 0) ? rootVariables[key] : (currentParent ? currentParent[key] : null);
+        if (!targetRef) continue;
+
+        targetRef.block = {}; 
+        
+		allContents.push({
+            level,
+            key,
+            content: { html: childBlockInfo.html, css: childBlockInfo.css }
+        });
+
+        const childVars = childBlockInfo.definition.variables || {};
+        
+        for (const [cKey, cValue] of Object.entries(childVars)) {
+            if (cValue.type !== "block") {
+                const flatName = `${cKey}${currentRootKey}${key}${level}`;
+                rootVariables[flatName] = JSON.parse(JSON.stringify(cValue));
+            }
+        }
+
+        const nextInnerBlocks = Object.entries(childVars).filter(([_, v]) => v.type === "block");
+
+        if (nextInnerBlocks.length > 0) {
+           const [firstInnerKey, firstInnerValue] = nextInnerBlocks[0];
+
+			targetRef.block = {
+				[firstInnerKey]: JSON.parse(JSON.stringify(firstInnerValue))
+			};
+
+            const res = await expandedDefinition(
+                childBlockInfo.definition,
+                level + 1,
+                rootVariables,
+                targetRef.block, 
+                maxLevel,
+				currentRootKey
+            );
+
+            allUsedKeys = [...allUsedKeys, ...res.usedKeys];
+            allContents = [...allContents, ...res.contents];
+        }
+
+        if (level > 0) break;
+    }
+
+    return { newVariables: rootVariables, usedKeys: allUsedKeys, contents: allContents };
+};
+
+export const transformToStructuredBlocks = (pages) => {
+    return pages.map((page) => {
+		const newBlocks = page.blocks.map((preparedBlock) => {
+			if(preparedBlock.isGlobal){
+				return preparedBlock
+			}
+			const additionalInfo = preparedBlock.additionalInfo;
+			if(!additionalInfo || additionalInfo.usedKeys.length === 0 || additionalInfo.contents.length === 0){
+				return preparedBlock
+			}
+			const {usedKeys, contents} = additionalInfo;
+			const variables = preparedBlock.variables;
+			const allSuffixes = usedKeys.map(uk => `${uk.rootKey}${uk.key}${uk.level}`);
+			const blockContainers = usedKeys.map(({ level, key, rootKey }) => {
+				const suffix = `${rootKey}${key}${level}`;
+				const blockData = { blockVars: {} };
+
+				Object.keys(variables).forEach(fullKey => {
+					if (fullKey.endsWith(suffix)) {
+						let realVarName = fullKey.slice(0, -suffix.length);
+						if (realVarName.endsWith(key) && realVarName !== key) {
+							realVarName = realVarName.slice(0, -key.length);
+						}
+
+						if (realVarName) {
+							blockData.blockVars[realVarName] = JSON.parse(JSON.stringify(variables[fullKey]));
+						}
+					}
+				});
+
+				let originalVar = preparedBlock.definition?.variables?.[rootKey];;
+
+				if(level !== 0){
+					for (let i = 1; i <= level; i++) {
+						const step = usedKeys.find(uk => uk.level === i);
+						if (step && originalVar?.block?.[step.key]) {
+							originalVar = originalVar.block[step.key];
+						} else {
+							originalVar = null;
+							break;
+						}
+					}
+				}
+			
+				blockData.originalType = originalVar?.blockType;
+
+				if (originalVar?.block && typeof originalVar.block === 'object') {
+					Object.keys(originalVar.block).forEach(subKey => {
+						let cleanSubKey = subKey;
+						if (cleanSubKey.endsWith(key) && cleanSubKey !== key) {
+							cleanSubKey = cleanSubKey.slice(0, -key.length);
+						}
+						if (!blockData.blockVars[cleanSubKey]) {
+							blockData.blockVars[cleanSubKey] = { type: "block" };
+						}
+					});
+				}
+
+				const contentMatch = contents.find(c => c.level === level && c.key === key);
+				if (contentMatch?.content?.css) {
+					preparedBlock.css += "\n" + contentMatch.content.css;
+				}
+
+				return { level, key, data: blockData, templateHtml: contentMatch?.content?.html || "" };
+			});
+
+			const sortedContainers = [...blockContainers].sort((a, b) => b.level - a.level);
+
+			sortedContainers.forEach(container => {
+				const blockId = `${container.key}${container.level}`;
+				const renderedHtml = scopeHtml(
+					{ html: container.templateHtml, blockType: container.data.originalType },
+					blockId,
+					container.data.blockVars
+				);
+
+				container.data.htmlContent = renderedHtml;
+
+				if (container.level > 0) {
+					const parent = sortedContainers.find(p => 
+						p.level === container.level - 1 && 
+						p.data.blockVars.hasOwnProperty(container.key)
+					);
+
+					if (parent) {
+						if (typeof parent.data.blockVars[container.key] !== 'object') {
+							parent.data.blockVars[container.key] = {};
+						}
+						parent.data.blockVars[container.key].htmlContent = renderedHtml;
+					}
+				}
+			});
+
+		const result = {};
+
+			Object.keys(variables).forEach(key => {
+				const isSuffixed = allSuffixes.some(s => key.endsWith(s));
+				
+				if (!isSuffixed) {
+					const originalVar = variables[key];
+					const rootMatch = sortedContainers.find(c => c.level === 0 && c.key === key);
+					
+					if (rootMatch) {
+						result[key] = {
+							type: "block",
+							blockType: rootMatch.data.originalType,
+							htmlContent: rootMatch.data.htmlContent,
+							variables: rootMatch.data.blockVars 
+						};
+					} else {
+						result[key] = JSON.parse(JSON.stringify(originalVar));
+					}
+				}
+			});
+		return { ...preparedBlock, variables: result };
+	})
+	return {...page, blocks: newBlocks}
+	})
 };
