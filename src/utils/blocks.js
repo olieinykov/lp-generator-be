@@ -198,24 +198,135 @@ Return ONLY valid JSON. All text in ${language}. No empty strings.
 	];
 };
 
-export const prepareBlock = async (block, prompt, country, language, navigation = null, zip) => {
+// export const prepareBlock = async (block, prompt, country, language, navigation = null, zip) => {
+// 	try {
+// 		if (block.hasError) {
+// 			throw new Error(block.error);
+// 		}
+//
+// 		let preparedVariables = {};
+//
+// 		for (const key in block.definition.variables) {
+// 			const variable = block.definition.variables[key];
+//
+// 			if (variable.type === "block" && variable.block) {
+// 				const preparedNestedBlock = await prepareBlock(
+// 					variable.block,
+// 					prompt,
+// 					country,
+// 					language,
+// 					navigation,
+// 					zip,
+// 				);
+//
+// 				console.log("Handle NESTING content", preparedNestedBlock)
+//
+// 				preparedVariables[key] = preparedNestedBlock;
+// 			}
+// 		}
+//
+// 		const [aiContent, tokens] = await generateBlockContent(
+// 			block.definition.variables,
+// 			block.category,
+// 			prompt,
+// 			country,
+// 			language,
+// 			null,
+// 			zip,
+// 		);
+//
+// 		const variables = {
+// 			...aiContent,
+// 			...preparedVariables,
+// 			...(navigation ? { navigation } : {}),
+// 		};
+//
+// 		return {
+// 			...block,
+// 			variables,
+// 			tokens,
+// 		};
+// 	} catch (error) {
+// 		return {
+// 			...block,
+// 			hasError: true,
+// 			error: error?.message,
+// 		};
+// 	}
+// };
+
+const emptyTokens = () => ({
+	promptTokens: 0,
+	completionTokens: 0,
+	totalTokens: 0,
+	totalFalCost: 0,
+});
+
+const sumTokens = (a = emptyTokens(), b = emptyTokens()) => ({
+	promptTokens: a.promptTokens + b.promptTokens,
+	completionTokens: a.completionTokens + b.completionTokens,
+	totalTokens: a.totalTokens + b.totalTokens,
+	totalFalCost: a.totalFalCost + b.totalFalCost,
+});
+
+export const prepareBlock = async (
+	block,
+	prompt,
+	country,
+	language,
+	navigation = null,
+	zip,
+) => {
 	try {
 		if (block.hasError) {
 			throw new Error(block.error);
 		}
-		const [aiContent, tokens] = await generateBlockContent(
-			block.definition.variables,
-			block.category,
-			prompt,
-			country,
-			language,
-			null,
-			zip,
-		);
 
-		const variables = navigation ? { ...aiContent, navigation } : aiContent;
+		let preparedVariables = {};
+		let primitiveVariables = {};
+		let totalTokens = emptyTokens();
 
-		return { ...block, variables, tokens };
+		for (const key in block.definition.variables) {
+			const variable = block.definition.variables[key];
+
+			if (variable.type === "block" && variable.block) {
+				const preparedNestedBlock = await prepareBlock(
+					variable.block,
+					prompt,
+					country,
+					language,
+					navigation,
+					zip,
+				);
+
+				preparedVariables[key] = preparedNestedBlock;
+				totalTokens = sumTokens(totalTokens, preparedNestedBlock.tokens);
+			} else {
+				primitiveVariables[key] = variable;
+			}
+		}
+
+		const [aiContent, ownTokens = emptyTokens()] =
+			await generateBlockContent(
+				primitiveVariables,
+				block.category,
+				prompt,
+				country,
+				language,
+				null,
+				zip,
+			);
+		totalTokens = sumTokens(totalTokens, ownTokens);
+
+		return {
+			...block,
+			variables: {
+				...aiContent,
+				...preparedVariables,
+				...(navigation ? { navigation } : {}),
+			},
+			tokens: totalTokens,
+		};
 	} catch (error) {
 		return {
 			...block,
@@ -346,17 +457,60 @@ const scopeHtml = (block, blockId, variables) => {
 	}
 };
 
+const childrenBlocksCollection = (blockInfo, blockId, rootEl = "", isPreview = false) => {
+    if (!blockInfo) return { html: "", css: "", variables: {} };
+    let accumulatedCss = "";
+    let updatedVars = blockInfo.variables ? { ...blockInfo.variables } : {};
+
+    Object.entries(blockInfo.definition.variables).forEach(([key, value], index) => {
+            if (value.type === "block" && value.block) {
+                const category = value.block.category;
+                const childId = `${category}-${rootEl ? `${rootEl}-` : ``}${key}-${index}`;
+
+				const childData = updatedVars[key];
+            
+            	const childVars = childData?.block ? childData.block : childData;
+
+	            const childBlockInfo = childVars 
+    	            ? { ...value.block, ...childVars } 
+        	        : value.block;
+
+                const { html, css } = childrenBlocksCollection(childBlockInfo, childId, key, isPreview);
+                updatedVars[key] = {
+                    ...(updatedVars[key] || {}),
+                    htmlContent: html
+                };
+                accumulatedCss += css + "\n";
+            } 
+    });
+
+    if (isPreview) {
+        updatedVars = replaceHrefWithHref64(updatedVars);
+    }
+
+    const resultHtml = scopeHtml(blockInfo, blockId, updatedVars);
+    
+    if (blockInfo.css) {
+        accumulatedCss += scopeCss(blockInfo.css, blockId) + "\n";
+    }
+
+    return {
+        html: resultHtml,
+        css: accumulatedCss,
+        updatedVars
+    };
+};
+
 export const buildPageHtml = (page, globalCss, language, country, seo = {}, isPreview = false) => {
 	const filledBlocks = page.blocks.map((block, blockIndex) => {
 		const id = `${block.blockType}-${blockIndex}`;
-
-		const originalVariables = block.variables;
-		const previewVariables = replaceHrefWithHref64(block.variables);
+		const originalVariables = childrenBlocksCollection(block, id, "");
+		const previewVariables = childrenBlocksCollection(block, id, "", true);
 		return {
 			...block,
-			scopedCss: scopeCss(block.css, id),
-			html: scopeHtml(block, id, originalVariables),
-			previewHtml: scopeHtml(block, id, previewVariables),
+			scopedCss: originalVariables.css,
+			html: originalVariables.html,
+			previewHtml: previewVariables.html,
 		};
 	});
 	const blocksHtml = filledBlocks.map((b) => b.html).join('\n');
@@ -452,15 +606,15 @@ export const buildSitePages = (pages, globalCss, language, country) => {
 		const pageHasErrors = page?.blocks?.some((block) => block.hasError);
 		const blocks = page?.blocks?.map((block, blockIndex) => {
 			return {
-				blockId: block.id || block.blockId,
+				blockId: block?.id || block?.blockId,
 				isGlobal: block.isGlobal,
 				blockType: block.blockType,
 				generationBlockId: `${block.blockType}-${blockIndex}`,
-				definition: block.definition,
-				variables: block.variables,
+				definition: block?.definition,
+				variables: block?.variables,
 				hasError: block?.hasError,
-				css: block.css,
-				html: block.html,
+				css: block?.css,
+				html: block?.html,
 			};
 		});
 
@@ -616,7 +770,6 @@ function buildExpectedShape(variables) {
 	return JSON.stringify(out, null, 2);
 }
 
-
 const getRandomAndRemove = (array, currentId, currentBlockIndex) => {
 	const filteredArray = array.filter(
 		(item) => item.block.id !== currentId || item.blockIndex !== currentBlockIndex,
@@ -629,6 +782,64 @@ const getRandomAndRemove = (array, currentId, currentBlockIndex) => {
 		item.block.id === selectedItem.block.id && item.blockIndex === selectedItem.blockIndex
 	));
 	return { updatedArray, selectedItem };
+}
+
+const fillAnchorsHelp = (page, currentFreeBlocks, rawNewBlock, blockIndexGlobal, allAnchors, startBlocksLength) => {
+    let freeBlocks = currentFreeBlocks;
+
+    const newBlock = rawNewBlock;
+    if (!newBlock || !newBlock.definition || !newBlock.definition.variables) {
+        return freeBlocks;
+    }
+
+    const fillVars = (key, result) => {
+        if (!result || !result.selectedItem) return;
+        
+        const targetBlock = result.selectedItem.block;
+        const href = `#${targetBlock.category}-${result.selectedItem.blockIndex}`;
+        
+        if (!newBlock.variables) newBlock.variables = {};
+        if (!newBlock.variables[key]) newBlock.variables[key] = {};
+        
+        const label = newBlock.variables[key].label; 
+        newBlock.variables[key].href = href;
+        
+        allAnchors.set(href, label);
+        freeBlocks = result.updatedArray;
+    }
+
+    Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
+        if (values.type === 'anchor') {
+            const isOnlyCurrentBlockLeft = freeBlocks.length === 1 && 
+                freeBlocks[0].block.id === newBlock.id && 
+                freeBlocks[0].blockIndex === blockIndexGlobal;
+
+            if (startBlocksLength > 1 && (isOnlyCurrentBlockLeft || freeBlocks.length === 0)) {
+                freeBlocks = page.blocks
+                    .map((block, blockIndex) => ({
+                        block,
+                        blockIndex,
+                    }))
+                    .filter((blockInfo) => {
+                        const b = blockInfo.block;
+                        return !blockInfo.block.hasError && b && b.category !== 'header' && b.category !== 'footer';
+                    });
+            }
+
+            let result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
+
+            fillVars(key, result);
+        }
+
+        if (values.type === "block") {
+            let nestedBlockRef = newBlock.variables && newBlock.variables[key];
+            if (nestedBlockRef) {
+                freeBlocks = fillAnchorsHelp(page, freeBlocks, nestedBlockRef, blockIndexGlobal, allAnchors, startBlocksLength);
+            }
+        }
+    });
+    
+    return freeBlocks;
 }
 
 export const fillAnchors = (pages, targetPage = '') => {
@@ -645,52 +856,16 @@ export const fillAnchors = (pages, targetPage = '') => {
 					}))
 					.filter(
 						(blockInfo) =>
-							blockInfo.block.category !== 'header' && blockInfo.block.category !== 'footer',
+							!blockInfo.block.hasError && blockInfo.block.category !== 'header' && blockInfo.block.category !== 'footer',
 					);
 				const startBlocksLength = freeBlocks.length;
 				const allAnchors = new Map();
 
-				const fillVars = (newBlock, key, result) => {
-						const href = `#${result.selectedItem.block.category}-${result.selectedItem.blockIndex}`;
-						const label = newBlock.variables[key].label;
-						newBlock.variables[key].href = href;
-						allAnchors.set(href, label);
-						freeBlocks = result.updatedArray;
-				}
-
 				const updatedBlocks = page.blocks.map((block, blockIndexGlobal) => {
 					let newBlock = JSON.parse(JSON.stringify(block));
 
-					if (startBlocksLength >= 1 && newBlock.definition.variables) {
-						Object.entries(newBlock.definition.variables).forEach(([key, values]) => {
-							if (values.type === 'anchor') {
-								const isOnlyCurrentBlockLeft = freeBlocks.length === 1 && 
-									freeBlocks[0].block.id === newBlock.id && 
-									freeBlocks[0].blockIndex === blockIndexGlobal;
-								if(startBlocksLength > 1 && (isOnlyCurrentBlockLeft || freeBlocks.length === 0)){
-										freeBlocks = page.blocks
-										.map((block, blockIndex) => ({
-											block,
-											blockIndex,
-										}))
-										.filter(
-											(blockInfo) =>
-												blockInfo.block.category !== 'header' &&
-												blockInfo.block.category !== 'footer',
-										);
-								}
-
-								let result = getRandomAndRemove(freeBlocks, newBlock.id, blockIndexGlobal);
-
-								if(!result.selectedItem && startBlocksLength === 1){
-									newBlock.variables[key].href = "";
-									newBlock.variables[key].label = "";
-									return
-								}
-
-								fillVars(newBlock, key, result);
-							}
-						});
+					if (startBlocksLength >= 1) {
+						fillAnchorsHelp(page, freeBlocks, newBlock, blockIndexGlobal, allAnchors, startBlocksLength)
 					} 
 					return newBlock;
 				});
@@ -700,13 +875,18 @@ export const fillAnchors = (pages, targetPage = '') => {
 					label,
 				}));
 
-				updatedBlocks.forEach((block) => {
-					Object.entries(block.definition.variables).forEach(([key, val]) => {
-						if (val.type === 'anchors') {
-							block.variables[key].value = uniqueAnchorsList;
-						}
-					});
-				});
+				updatedBlocks.forEach((rawBlock) => {
+                const block = rawBlock;
+                if (block && block.definition && block.definition.variables) {
+                    Object.entries(block.definition.variables).forEach(([key, val]) => {
+                        if (val.type === 'anchors') {
+                            if (!block.variables) block.variables = {};
+                            if (!block.variables[key]) block.variables[key] = {};
+                            block.variables[key].value = uniqueAnchorsList;
+                        }
+                    });
+                }
+            });
 
 				return { ...page, blocks: updatedBlocks };
 			});
@@ -714,5 +894,4 @@ export const fillAnchors = (pages, targetPage = '') => {
 		console.error("Error in fillAnchors function: ", err)
 		return pages
 	}
-	
 };

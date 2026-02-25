@@ -13,7 +13,7 @@ import {
 	prepareGlobalBlocks,
 } from '../../utils/blocks.js';
 import { filteredZip, replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
-import { generateNginxConfig, generateSite, generateSitemapXml } from '../../utils/generator.js';
+import { generateNginxConfig, generateSite, generateSitemapXml, resolveDefinition } from '../../utils/generator.js';
 import Decimal from 'decimal.js';
 
 function cutNumber(number, amountAfterDot) {
@@ -483,8 +483,9 @@ export const regenerateBlock = async (request, reply) => {
 			tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 			generatedBlock = preparedBlock;
 		} else {
+			const nestedBlock = await resolveDefinition(block);
 			const preparedBlock = await prepareBlock(
-				block,
+				nestedBlock,
 				site.prompt || prompt,
 				site.country,
 				site.language,
@@ -537,9 +538,7 @@ export const regenerateBlock = async (request, reply) => {
 				}),
 			};
 		});
-
 		const updatedPagesWithAnchor = fillAnchors(updatedPages, isBlockGlobal ? '' : pageName);
-
 		const sitePages = buildSitePages(
 			updatedPagesWithAnchor,
 			site.siteConfigDetailed.generatedTheme,
