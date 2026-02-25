@@ -800,10 +800,11 @@ export const transformToStructuredBlocks = (pages) => {
 			if(preparedBlock.isGlobal){
 				return preparedBlock
 			}
-			const {usedKeys, contents} = preparedBlock.additionalInfo;
-			if(usedKeys.length === 0 || contents.length === 0){
+			const additionalInfo = preparedBlock.additionalInfo;
+			if(!additionalInfo || additionalInfo.usedKeys.length === 0 || additionalInfo.contents.length === 0){
 				return preparedBlock
 			}
+			const {usedKeys, contents} = additionalInfo;
 			const variables = preparedBlock.variables;
 			const allSuffixes = usedKeys.map(uk => `${uk.rootKey}${uk.key}${uk.level}`);
 			const blockContainers = usedKeys.map(({ level, key, rootKey }) => {
