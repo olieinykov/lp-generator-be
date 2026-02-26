@@ -219,7 +219,6 @@ export async function extractAndValidate(buffer) {
 		const zip = new AdmZip(buffer);
 		const zipEntries = zip.getEntries();
 
-		const newZip = new AdmZip();
 		// Get file list from archive
 		const fileList = zipEntries
 			.filter((entry) => !entry.isDirectory)
@@ -247,32 +246,14 @@ export async function extractAndValidate(buffer) {
 			name: 'definition.json',
 			content: defBuffer.toString('utf-8'),
 		};
-
-		for (const entry of zipEntries) {
-            if (entry.isDirectory) continue;
-            
-            const entryName = entry.entryName;
-            let fileBuffer = entry.getData();
-
-            if (entryName === 'index.njk') {
-                let contentString = fileBuffer.toString('utf-8');
-                contentString = contentString.replace(/\{\{([^}]*?\.htmlContent[^}]*?)\}\}/g, (match, innerText) => {
-                    if (innerText.includes('|')) return match;
-                    return `{{ ${innerText.trim()} | safe }}`;
-                });
-                fileBuffer = Buffer.from(contentString, 'utf-8');
-            }
-
-            newZip.addFile(entryName, fileBuffer);
-        }
 		
 		for (const requiredFile of REQUIRED_FILES) {
 			if (requiredFile == 'definition.json') {
 				continue;
 			}
-			const entry = newZip.getEntry(requiredFile);
+			const entry = zipEntries.find((e) => e.entryName === requiredFile);
 			if (entry) {
-				let fileBuffer = entry.getData();
+				const fileBuffer = entry.getData();
 
 				// Validate file content
 				await validateFileContent(requiredFile, fileBuffer, defVariables);
@@ -286,15 +267,12 @@ export async function extractAndValidate(buffer) {
 			}
 		}
 
-		const modifiedZipBuffer = newZip.toBuffer();
-
 		return {
 			isValid: true,
 			files: extractedFiles,
 			fileList,
-			fileCount: fileList.length,
+			fileCount: buffer.length,
 			totalSize: modifiedZipBuffer.length,
-            modifiedBuffer: modifiedZipBuffer,
 		};
 	} catch (error) {
 		throw new Error(`Archive processing failed: ${error.message}`);

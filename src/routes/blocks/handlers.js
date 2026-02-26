@@ -141,11 +141,9 @@ export const createBlock = async (request, reply) => {
 
 		const archiveFilename = archiveProcessor.generateArchiveName(fileData.filename);
 
-		const bufferToUpload = archiveResult.modifiedBuffer || archiveBuffer;
-
 		const { data: uploadData, error: uploadError } = await supabase.storage
 			.from('blocks')
-			.upload(archiveFilename, bufferToUpload, {
+			.upload(archiveFilename, archiveBuffer, {
 				contentType: 'application/zip',
 				upsert: false,
 			});

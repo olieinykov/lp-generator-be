@@ -8,6 +8,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fal, openai } from '../lib/AiClients.js';
 
+nunjucks.configure({ autoescape: false });
+
 const generateImageWithFal = async (prompt, zip) => {
 	try {
 		const { data } = await fal.run('fal-ai/flux/schnell', {
@@ -335,10 +337,9 @@ const scopeCss = (scss, blockId) => {
 
 const scopeHtml = (block, blockId, variables, isPreview = false) => {
 	try {
-		let updatedVars = variables;
+		let updatedVars = JSON.parse(JSON.stringify(variables));
 		const fallbackHTML = `<div id="${blockId}" class="generation-block-error">Failed to render ${block.blockType}</div>`;
 		if(isPreview){
-			updatedVars = JSON.parse(JSON.stringify(variables));
 			Object.values(updatedVars).forEach((value) => {
 				if(value && typeof value === 'object' && 'previewHtmlContent' in value){
 					value.htmlContent = value.previewHtmlContent
