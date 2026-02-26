@@ -271,8 +271,8 @@ export async function extractAndValidate(buffer) {
 			isValid: true,
 			files: extractedFiles,
 			fileList,
-			fileCount: buffer.length,
-			totalSize: modifiedZipBuffer.length,
+			fileCount: fileList.length,
+			totalSize: buffer.length,
 		};
 	} catch (error) {
 		throw new Error(`Archive processing failed: ${error.message}`);
