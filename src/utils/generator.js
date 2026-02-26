@@ -186,13 +186,11 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 		},
 		sitePages,
 		siteConfigDetailed,
-		previews: sitePages.map((page) =>{ 
-			console.log("HTML PREVIEW ==== ", page.previewHtml)
-			return{
+		previews: sitePages.map((page) => ({
 			html: page.previewHtml,
 			filename: page.filename,
 			hasErrors: page.pageHasErrors,
-		}}),
+		})),
 		siteConfig: siteConfigDetailed?.pages?.map((page) => ({
 			...page,
 			blocks: page?.blocks?.map((block) => ({
