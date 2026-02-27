@@ -15,7 +15,7 @@ const ALLOWED_KEYS = {
 	nav: ['type', 'value'],
 	anchor: ['type', 'href', 'label'],
 	anchors: ['type', 'value'],
-	block: ['type', 'blockType']
+	block: ['type', 'blockType'],
 };
 
 const ALLOWED_EXTENSIONS = ['.zip'];
@@ -246,7 +246,7 @@ export async function extractAndValidate(buffer) {
 			name: 'definition.json',
 			content: defBuffer.toString('utf-8'),
 		};
-		
+
 		for (const requiredFile of REQUIRED_FILES) {
 			if (requiredFile == 'definition.json') {
 				continue;

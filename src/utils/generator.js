@@ -68,8 +68,12 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 						};
 					} else {
 						const block = await getBlockByType(blockDef.type);
-						const {newVariables: newVars, usedKeys, contents} = await expandedDefinition(block.definition);
-						const expandedBlock = {...block, definition: {variables: newVars} }
+						const {
+							newVariables: newVars,
+							usedKeys,
+							contents,
+						} = await expandedDefinition(block.definition);
+						const expandedBlock = { ...block, definition: { variables: newVars } };
 						const preparedBlock = await prepareBlock(
 							expandedBlock,
 							prompt,
@@ -89,8 +93,8 @@ export const generateSite = async ({ currentTokens, template, prompt, country, l
 							...preparedBlock,
 							additionalInfo: {
 								usedKeys,
-								contents
-							}
+								contents,
+							},
 						};
 					}
 				} catch (error) {
@@ -311,24 +315,18 @@ export const generateNginxConfig = ({ serverName, rootDir } = {}) => {
 };
 
 export const generateRobotsTxt = (domain) => {
-	try{
+	try {
 		if (!domain) {
-        throw new Error('To create robots.txt we need to have domain');
-    }
+			throw new Error('To create robots.txt we need to have domain');
+		}
 
-    const cleanDomain = domain.replace(/\/$/, '');
+		const cleanDomain = domain.replace(/\/$/, '');
 
-    const lines = [
-        'User-agent: *',
-        'Allow: /',
-        '',
-        `Sitemap: ${cleanDomain}/sitemap.xml`
-    ];
+		const lines = ['User-agent: *', 'Allow: /', '', `Sitemap: ${cleanDomain}/sitemap.xml`];
 
-    return lines.join('\n');
-	} catch(err){
-		console.warn(err)
-		return null
+		return lines.join('\n');
+	} catch (err) {
+		console.warn(err);
+		return null;
 	}
-    
-}
+};

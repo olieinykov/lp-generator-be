@@ -15,7 +15,12 @@ import {
 	transformToStructuredBlocks,
 } from '../../utils/blocks.js';
 import { filteredZip, replaceSiteZipWithNew } from '../../utils/archiveProcessor.js';
-import { generateNginxConfig, generateRobotsTxt, generateSite, generateSitemapXml } from '../../utils/generator.js';
+import {
+	generateNginxConfig,
+	generateRobotsTxt,
+	generateSite,
+	generateSitemapXml,
+} from '../../utils/generator.js';
 import Decimal from 'decimal.js';
 
 function cutNumber(number, amountAfterDot) {
@@ -56,7 +61,7 @@ export const createSite = async (request, reply) => {
 
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, domain);
 		const nginxConfig = generateNginxConfig({ serverName: domain });
-		const robotsTxt = generateRobotsTxt(domain)
+		const robotsTxt = generateRobotsTxt(domain);
 		// const zip = new AdmZip();
 		sitePages.forEach((page) => {
 			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
@@ -488,8 +493,12 @@ export const regenerateBlock = async (request, reply) => {
 			tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 			generatedBlock = preparedBlock;
 		} else {
-			const {newVariables: newVars, usedKeys, contents} = await expandedDefinition(block.definition);
-			const expandedBlock = {...block, definition: {variables: newVars} }
+			const {
+				newVariables: newVars,
+				usedKeys,
+				contents,
+			} = await expandedDefinition(block.definition);
+			const expandedBlock = { ...block, definition: { variables: newVars } };
 			const preparedBlock = await prepareBlock(
 				expandedBlock,
 				site.prompt || prompt,
@@ -504,7 +513,7 @@ export const regenerateBlock = async (request, reply) => {
 			tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
 			tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 
-			generatedBlock = {...preparedBlock, additionalInfo: {usedKeys, contents}};
+			generatedBlock = { ...preparedBlock, additionalInfo: { usedKeys, contents } };
 		}
 
 		const updatedPages = site.siteConfigDetailed?.pages?.map((page) => {
@@ -533,19 +542,19 @@ export const regenerateBlock = async (request, reply) => {
 							hasError: false,
 							css: generatedBlock.css,
 							html: generatedBlock.html,
-							additionalInfo: generatedBlock.additionalInfo
+							additionalInfo: generatedBlock.additionalInfo,
 						};
 					}
-					
+
 					return {
-							...block,
-							id: block.blockId,
-							category: block.blockType,
-							additionalInfo: {
-								usedKeys: [],
-								contents: []
-							}
-						};
+						...block,
+						id: block.blockId,
+						category: block.blockType,
+						additionalInfo: {
+							usedKeys: [],
+							contents: [],
+						},
+					};
 				}),
 			};
 		});
