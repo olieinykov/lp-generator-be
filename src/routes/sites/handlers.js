@@ -62,7 +62,7 @@ export const createSite = async (request, reply) => {
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, domain);
 		const nginxConfig = generateNginxConfig({ serverName: domain });
 		const robotsTxt = generateRobotsTxt(domain);
-		// const zip = new AdmZip();
+
 		sitePages.forEach((page) => {
 			zip.addFile(page.filename, Buffer.from(page.html, 'utf8'));
 		});
