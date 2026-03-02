@@ -38,7 +38,7 @@ const generateImageWithFal = async (prompt, zip) => {
 
 		return {
 			url: zipPath,
-			base64: response.url,
+			//base64: response.url,
 			cost: Number(cost.toFixed(4)),
 			size: `${image.width}x${image.height}`,
 		};
@@ -59,7 +59,7 @@ const processImages = async (content, variables, zip) => {
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
 			const { url, base64, cost } = await generateImageWithFal(value.href, zip);
 			content[key].href = url;
-			content[key].href64 = base64;
+			//content[key].href64 = base64;
 			totalFalCost += cost;
 		}
 
@@ -72,7 +72,7 @@ const processImages = async (content, variables, zip) => {
 							zip,
 						);
 						item[itemKey].href = url;
-						item[itemKey].href64 = base64;
+						//item[itemKey].href64 = base64;
 						totalFalCost += cost;
 					}
 				}
@@ -322,13 +322,15 @@ export const prepareGlobalBlocks = async (
 
 const scopeCss = (scss, blockId) => {
 	try {
-		const replacedScss = scss.replace(/#_blockId/g, `#${blockId}`);
-		const result = sass.compileString(replacedScss);
-		return `
-			/*!CSS-BLOCK:${blockId}:START!*/
-				${result.css}
-			/*!CSS-BLOCK:${blockId}:END!*/
-		`;
+		if(scss){
+			const replacedScss = scss.replace(/#_blockId/g, `#${blockId}`);
+			const result = sass.compileString(replacedScss);
+			return `
+				/*!CSS-BLOCK:${blockId}:START!*/
+					${result.css}
+				/*!CSS-BLOCK:${blockId}:END!*/
+			`;
+		}
 	} catch (error) {
 		console.error(`${blockId}:`, error);
 		return scss;
@@ -337,15 +339,18 @@ const scopeCss = (scss, blockId) => {
 
 const scopeHtml = (block, blockId, variables, isPreview = false) => {
 	try {
-		let updatedVars = JSON.parse(JSON.stringify(variables));
-		const fallbackHTML = `<div id="${blockId}" class="generation-block-error">Failed to render ${block.blockType}</div>`;
-		if (isPreview) {
+		let updatedVars = null;
+		if(!block.hasError){
+			updatedVars = JSON.parse(JSON.stringify(variables));
+			if (isPreview) {
 			Object.values(updatedVars).forEach((value) => {
 				if (value && typeof value === 'object' && 'previewHtmlContent' in value) {
 					value.htmlContent = value.previewHtmlContent;
 				}
 			});
 		}
+		}
+		const fallbackHTML = `<div id="${blockId}" class="generation-block-error">Failed to render ${block.blockType}</div>`;
 		const result = block.hasError
 			? fallbackHTML
 			: nunjucks.renderString(block.html, {
@@ -683,6 +688,7 @@ export const fillAnchors = (pages, targetPage = '') => {
 			};
 
 			const updatedBlocks = page.blocks.map((block, blockIndexGlobal) => {
+				if(block.hasError) return block;
 				let newBlock = JSON.parse(JSON.stringify(block));
 
 				if (startBlocksLength >= 1 && newBlock.definition.variables) {
@@ -727,6 +733,7 @@ export const fillAnchors = (pages, targetPage = '') => {
 			}));
 
 			updatedBlocks.forEach((block) => {
+				if(block.hasError) return;
 				Object.entries(block.definition.variables).forEach(([key, val]) => {
 					if (val.type === 'anchors') {
 						block.variables[key].value = uniqueAnchorsList;
