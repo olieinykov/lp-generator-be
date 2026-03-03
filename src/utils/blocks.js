@@ -82,16 +82,26 @@ const processImages = async (content, variables, zip) => {
 	return { content, totalFalCost };
 };
 
-export const getBlockByType = async (type) => {
+export const getBlockByType = async (type, isReusable = false) => {
+	const conditions = [
+        eq(blocks.category, type),
+        eq(blocks.isActive, true)
+    ];
+
+    if (isReusable) {
+        conditions.push(eq(blocks.isReusableAsChildren, isReusable));
+    }
+
 	const [block] = await db
 		.select()
 		.from(blocks)
-		.where(and(eq(blocks.category, type), eq(blocks.isActive, true)))
+		.where(and(...conditions))
 		.orderBy(sql`RANDOM()`)
 		.limit(1);
 
 	if (!block) {
-		throw new Error(`No active block found for type: ${type}`);
+		const reusableText = isReusable ? ` (isReusableAsChildren: ${isReusable})` : '';
+		throw new Error(`No active block found for type: ${type}${reusableText}`);
 	}
 
 	const unzippedBlock = await downloadAndUnzipBlock(block.archiveUrl);
@@ -773,7 +783,7 @@ export const expandedDefinition = async (
 		const currentRootKey = level === 0 ? key : rootKey;
 
 		allUsedKeys.push({ level, key, rootKey: currentRootKey });
-		const childBlockInfo = await getBlockByType(value.blockType);
+		const childBlockInfo = await getBlockByType(value.blockType, true);
 
 		if (!childBlockInfo) {
 			console.warn(`[Warning] There no block for type: ${value.blockType}`);
@@ -970,4 +980,46 @@ export const transformToStructuredBlocks = (pages) => {
 		});
 		return { ...page, blocks: newBlocks };
 	});
+};
+
+export const fillBrandName = (input, brandName) => {
+    const processBlock = (block) => {
+        if (block.hasError) return block;
+
+        const targetKeys = Object.keys(block.variables).filter((key) => 
+            key.startsWith("brandName")
+        );
+
+        if (targetKeys.length === 0) return block;
+
+        const updatedVariables = { ...block.variables };
+        targetKeys.forEach((key) => {
+            updatedVariables[key] = {
+                ...updatedVariables[key],
+                value: brandName
+            };
+        });
+
+        return {
+            ...block,
+            variables: updatedVariables
+        };
+    };
+
+    if (Array.isArray(input)) {
+        return input.map((item) => {
+            if (item.blocks && Array.isArray(item.blocks)) {
+                return {
+                    ...item,
+                    blocks: item.blocks.map(processBlock)
+                };
+            }
+            return processBlock(item);
+        });
+    }
+
+    if (typeof input === 'object') {
+        return processBlock(input);
+    }
+    return input;
 };
