@@ -379,6 +379,7 @@ export const replaceSiteZipWithNew = async (
 	sitemapXml,
 	sitemapError,
 	nginxConfig,
+	robotsTxt
 ) => {
 	const zipEntries = zip.getEntries();
 
@@ -399,6 +400,10 @@ export const replaceSiteZipWithNew = async (
 
 	if (nginxConfig) {
 		zip.addFile('nginx.conf', Buffer.from(nginxConfig, 'utf8'));
+	}
+
+	if (robotsTxt) {
+		zip.addFile('robots.txt', Buffer.from(robotsTxt, 'utf8'));
 	}
 
 	const zipBuffer = zip.toBuffer();

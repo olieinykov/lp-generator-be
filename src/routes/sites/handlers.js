@@ -9,6 +9,7 @@ import {
 	buildSitePages,
 	expandedDefinition,
 	fillAnchors,
+	fillBrandName,
 	getBlockByType,
 	prepareBlock,
 	prepareGlobalBlocks,
@@ -125,6 +126,7 @@ export const createSite = async (request, reply) => {
 		return reply.status(201).send({
 			data: {
 				...siteData,
+				domain,
 				previews,
 				siteConfig,
 				siteConfigDetailed,
@@ -505,13 +507,13 @@ export const regenerateBlock = async (request, reply) => {
 				null,
 				currentSiteZip,
 			);
-
+			const blockWithBrandName = fillBrandName(preparedBlock, site.siteConfigDetailed.brandName)
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
 			tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 			tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
 			tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
 
-			generatedBlock = { ...preparedBlock, additionalInfo: { usedKeys, contents } };
+			generatedBlock = { ...blockWithBrandName, additionalInfo: { usedKeys, contents } };
 		}
 
 		const updatedPages = site.siteConfigDetailed?.pages?.map((page) => {
@@ -571,6 +573,8 @@ export const regenerateBlock = async (request, reply) => {
 
 		const nginxConfig = generateNginxConfig({ serverName: site.domain });
 
+		const robotsTxt = generateRobotsTxt(site.domain);
+
 		const urlData = await replaceSiteZipWithNew(
 			sitePages,
 			site.name,
@@ -579,9 +583,11 @@ export const regenerateBlock = async (request, reply) => {
 			siteMapBody,
 			sitemapError,
 			nginxConfig,
+			robotsTxt
 		);
 
 		const siteConfigDetailed = {
+			brandName: site.siteConfigDetailed.brandName,
 			pages: sitePages?.map((page) => ({
 				title: page.title,
 				path: page.path,
