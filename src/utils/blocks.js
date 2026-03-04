@@ -640,7 +640,13 @@ function buildExpectedShape(variables) {
 			out[name] = {
 				blockType: v.blockType || '...',
 			};
-		} else {
+		} else if (v?.type === 'brandName') {
+			out[name] = {
+				type: "brandName",
+				value: '...' 
+			};
+		}
+		else {
 			out[name] = { value: '...' };
 		}
 	}
@@ -984,9 +990,8 @@ export const transformToStructuredBlocks = (pages) => {
 export const fillBrandName = (input, brandName) => {
     const processBlock = (block) => {
         if (block.hasError) return block;
-
         const targetKeys = Object.keys(block.variables).filter((key) => 
-            key.startsWith("brandName")
+            block.variables[key].type === "brandName"
         );
 
         if (targetKeys.length === 0) return block;
@@ -994,7 +999,6 @@ export const fillBrandName = (input, brandName) => {
         const updatedVariables = { ...block.variables };
         targetKeys.forEach((key) => {
             updatedVariables[key] = {
-                ...updatedVariables[key],
                 value: brandName
             };
         });
