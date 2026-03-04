@@ -151,6 +151,7 @@ export const getAllSites = async (request, reply) => {
 			trafficSource,
 			country,
 			language,
+			domain,
 			isActive,
 			createdBy,
 			updatedBy,
@@ -190,6 +191,7 @@ export const getAllSites = async (request, reply) => {
 		if (trafficSource) filters.push(eq(sites.trafficSource, trafficSource));
 		if (country) filters.push(eq(sites.country, country));
 		if (language) filters.push(eq(sites.language, language));
+		if (domain) filters.push(eq(sites.domain, domain));
 
 		if (createdAtFromDate) filters.push(gte(sites.createdAt, createdAtFromDate));
 		if (createdAtToDate) filters.push(lte(sites.createdAt, createdAtToDate));
@@ -220,6 +222,7 @@ export const getAllSites = async (request, reply) => {
 				completionTokens: sites.completionTokens,
 				totalFalPrice: sites.totalFalPrice,
 				language: sites.language,
+				domain: sites.domain,
 				trafficSource: sites.trafficSource,
 				country: sites.country,
 				totalTokens: sites.totalTokens,

@@ -38,7 +38,7 @@ const generateImageWithFal = async (prompt, zip) => {
 
 		return {
 			url: zipPath,
-			base64: response.url,
+			//base64: response.url,
 			cost: Number(cost.toFixed(4)),
 			size: `${image.width}x${image.height}`,
 		};
@@ -59,7 +59,7 @@ const processImages = async (content, variables, zip) => {
 		if (varDef?.type === 'image' && value?.href && !value.href.startsWith('http')) {
 			const { url, base64, cost } = await generateImageWithFal(value.href, zip);
 			content[key].href = url;
-			content[key].href64 = base64;
+			//content[key].href64 = base64;
 			totalFalCost += cost;
 		}
 
@@ -72,7 +72,7 @@ const processImages = async (content, variables, zip) => {
 							zip,
 						);
 						item[itemKey].href = url;
-						item[itemKey].href64 = base64;
+						//item[itemKey].href64 = base64;
 						totalFalCost += cost;
 					}
 				}
@@ -641,7 +641,13 @@ function buildExpectedShape(variables) {
 			out[name] = {
 				blockType: v.blockType || '...',
 			};
-		} else {
+		} else if (v?.type === 'brandName') {
+			out[name] = {
+				type: "brandName",
+				value: '...' 
+			};
+		}
+		else {
 			out[name] = { value: '...' };
 		}
 	}
@@ -985,9 +991,9 @@ export const transformToStructuredBlocks = (pages) => {
 export const fillBrandName = (input, brandName) => {
     const processBlock = (block) => {
         if (block.hasError) return block;
-
+		console.log("BLOCK ====== ", JSON.stringify(block.variables,2,null))
         const targetKeys = Object.keys(block.variables).filter((key) => 
-            key.startsWith("brandName")
+            block.variables[key].type === "brandName"
         );
 
         if (targetKeys.length === 0) return block;
@@ -995,7 +1001,6 @@ export const fillBrandName = (input, brandName) => {
         const updatedVariables = { ...block.variables };
         targetKeys.forEach((key) => {
             updatedVariables[key] = {
-                ...updatedVariables[key],
                 value: brandName
             };
         });
