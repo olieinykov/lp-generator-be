@@ -191,7 +191,7 @@ export const getAllSites = async (request, reply) => {
 		if (trafficSource) filters.push(eq(sites.trafficSource, trafficSource));
 		if (country) filters.push(eq(sites.country, country));
 		if (language) filters.push(eq(sites.language, language));
-		if (domain) filters.push(eq(sites.domain, domain));
+		if (domain) filters.push(ilike(sites.domain, `%${domain}%`));
 
 		if (createdAtFromDate) filters.push(gte(sites.createdAt, createdAtFromDate));
 		if (createdAtToDate) filters.push(lte(sites.createdAt, createdAtToDate));
