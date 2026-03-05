@@ -108,6 +108,7 @@ export const createSite = async (request, reply) => {
 				archiveUrl: urlData.publicUrl,
 				country: country,
 				language: language,
+				domain: domain,
 				definition: template.id,
 				prompt: prompt,
 				totalFalPrice: tokens.totalFalCost,
@@ -461,7 +462,6 @@ export const regenerateBlock = async (request, reply) => {
 		if (!site) {
 			throw new Error(`Failed to find site with id "${siteId}"`);
 		}
-
 		const block = await getBlockByType(blockType);
 
 		const tokensInfo = {
@@ -491,12 +491,12 @@ export const regenerateBlock = async (request, reply) => {
 				site.language,
 				currentSiteZip,
 			);
-
+			const blockWithBrandName = fillBrandName(preparedBlock, site.siteConfigDetailed.brandName)
 			tokensInfo.totalPromptTokens += preparedBlock.tokens.promptTokens;
 			tokensInfo.totalCompletionTokens += preparedBlock.tokens.completionTokens;
 			tokensInfo.totalTokens += preparedBlock.tokens.totalTokens;
 			tokensInfo.totalFalCost += preparedBlock.tokens.totalFalCost;
-			generatedBlock = preparedBlock;
+			generatedBlock = blockWithBrandName;
 		} else {
 			const {
 				newVariables: newVars,
@@ -521,7 +521,7 @@ export const regenerateBlock = async (request, reply) => {
 			generatedBlock = { ...blockWithBrandName, additionalInfo: { usedKeys, contents } };
 		}
 
-		const updatedPages = site.siteConfigDetailed?.pages?.map((page) => {
+		const updatedPages = site.siteConfigDetailed?.pages?.map((page, index) => {
 			const shouldUpdatePage = isBlockGlobal || page.filename === pageName;
 
 			if (!shouldUpdatePage) {
@@ -530,6 +530,7 @@ export const regenerateBlock = async (request, reply) => {
 
 			return {
 				...page,
+				seo: site.siteConfigDetailed.seoPages[index],
 				blocks: page.blocks.map((block, blockIndex) => {
 					const generationBlockMatch = block.generationBlockId === generationBlockId;
 					const globalTypeMatch =
@@ -578,7 +579,7 @@ export const regenerateBlock = async (request, reply) => {
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, site.domain);
 
 		const nginxConfig = generateNginxConfig({ serverName: site.domain });
-
+		
 		const robotsTxt = generateRobotsTxt(site.domain);
 
 		const urlData = await replaceSiteZipWithNew(
@@ -601,7 +602,7 @@ export const regenerateBlock = async (request, reply) => {
 				blocks: page.blocks,
 			})),
 			generatedTheme: site.siteConfigDetailed.generatedTheme,
-			// seoPages: site.siteConfigDetailed.seoPages,
+			seoPages: site.siteConfigDetailed.seoPages,
 		};
 		const inputPrice =
 			tokensInfo.totalPromptTokens * (PRICE_FOR_PROMPTS_OPENAI.input / 1000000);
