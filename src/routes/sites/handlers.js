@@ -579,7 +579,6 @@ export const regenerateBlock = async (request, reply) => {
 		const { siteMapBody, hasError: sitemapError } = generateSitemapXml(sitePages, site.domain);
 
 		const nginxConfig = generateNginxConfig({ serverName: site.domain });
-		
 		const robotsTxt = generateRobotsTxt(site.domain);
 
 		const urlData = await replaceSiteZipWithNew(
