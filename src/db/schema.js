@@ -45,6 +45,7 @@ export const templates = pgTable('templates', {
 	name: varchar('name', { length: 255 }).notNull(),
 	fileName: varchar('file_name', { length: 255 }).notNull(),
 	isActive: boolean('is_active').default(true).notNull(),
+	// archiveUrl: varchar("archive_url", { length: 1024 }).notNull(),
 	definition: jsonb('definition').notNull(),
 	createdBy: uuid('created_by')
 		.notNull()
@@ -62,9 +63,9 @@ export const sites = pgTable('sites', {
 	isDraft: boolean('is_draft').default(true).notNull(),
 	isActive: boolean('is_active').default(true).notNull(),
 	trafficSource: varchar('traffic_source', { length: 255 }).notNull(),
-	domain: varchar('domain', { length: 255 }).notNull(),
 	country: varchar('country', { length: 255 }).notNull(),
 	language: varchar('language', { length: 255 }).notNull(),
+	domain: varchar('domain', { length: 255 }),
 	archiveUrl: varchar('archive_url', { length: 1024 }).notNull(),
 	definition: jsonb('definition').notNull(),
 	siteConfigDetailed: jsonb('site_config_detailed').notNull(),

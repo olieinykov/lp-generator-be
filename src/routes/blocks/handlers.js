@@ -158,10 +158,37 @@ export const createBlock = async (request, reply) => {
 
 		const archiveUrl = urlData.publicUrl;
 
+		// const definitionContent = archiveResult.files['definition.json'].content;
+		// const templateDefinition = JSON.parse(definitionContent);
+
 		const blockDefinition = {
 			originalArchive: fileData.filename,
 			mimeType: fileData.mimetype,
 			archiveSize: archiveBuffer.length,
+			// template: {
+			// 	name: name,
+			// 	description: templateDefinition.description || '',
+			// },
+			// files: {
+			// 	template: {
+			// 		size: archiveResult.files['template.html'].size,
+			// 		lines: archiveResult.files['template.html'].content.split('\n').length,
+			// 	},
+			// 	styles: {
+			// 		size: archiveResult.files['styles.css'].size,
+			// 		lines: archiveResult.files['styles.css'].content.split('\n').length,
+			// 	},
+			// 	// script: {
+			// 	//   size: archiveResult.files["main.js"].size,
+			// 	//   lines: archiveResult.files["main.js"].content.split("\n").length,
+			// 	// },
+			// },
+			// validation: {
+			// 	isValid: archiveResult.isValid,
+			// 	requiredFiles: archiveProcessor.requiredFiles,
+			// 	totalFiles: archiveResult.fileCount,
+			// 	validatedAt: new Date().toISOString(),
+			// },
 		};
 
 		const [newBlock] = await db
@@ -285,6 +312,7 @@ export const updateBlock = async (request, reply) => {
 			updatedAt: new Date(),
 		};
 
+		// If no new file — simple update
 		if (!fileData) {
 			const [updatedBlock] = await db
 				.update(blocks)
@@ -312,7 +340,7 @@ export const updateBlock = async (request, reply) => {
 			.from('blocks')
 			.upload(safeArchiveFilename, archiveBuffer, {
 				contentType: 'application/zip',
-				upsert: false,
+				upsert: false, // false is OK because filename contains timestamp -> unique
 			});
 
 		if (uploadError) {

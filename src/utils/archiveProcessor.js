@@ -5,6 +5,7 @@ import slugify from 'slugify';
 import { supabase } from '../db/connection.js';
 import nunjucks from 'nunjucks';
 
+// Required files for web template
 const REQUIRED_FILES = ['definition.json', 'index.njk', 'styles.scss'];
 const ALLOWED_KEYS = {
 	text: ['type', 'value'],
@@ -25,15 +26,18 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
  * Validate archive file
  */
 export function validateArchive(buffer, mimetype, originalName) {
+	// Check MIME type
 	if (!mimetype.includes('zip') && !mimetype.includes('x-zip-compressed')) {
 		throw new Error('Invalid archive format. Only ZIP files are allowed');
 	}
 
+	// Check file extension
 	const ext = path.extname(originalName).toLowerCase();
 	if (!ALLOWED_EXTENSIONS.includes(ext)) {
 		throw new Error(`Invalid file extension. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`);
 	}
 
+	// Check file size
 	if (buffer.length > MAX_FILE_SIZE) {
 		throw new Error(`Archive too large. Maximum size: ${MAX_FILE_SIZE / 1024 / 1024}MB`);
 	}
@@ -150,6 +154,7 @@ async function validateFileContent(filename, buffer, variables = null) {
 				throw new Error(`File ${filename} cannot be empty`);
 			}
 
+			// Basic HTML validation
 			if (!content.includes('<') && !content.includes('>')) {
 				throw new Error(`File ${filename} does not appear to be valid HTML`);
 			}
@@ -220,10 +225,12 @@ export async function extractAndValidate(buffer) {
 		const zip = new AdmZip(buffer);
 		const zipEntries = zip.getEntries();
 
+		// Get file list from archive
 		const fileList = zipEntries
 			.filter((entry) => !entry.isDirectory)
 			.map((entry) => entry.entryName);
 
+		// Check for required files
 		const missingFiles = REQUIRED_FILES.filter(
 			(requiredFile) => !fileList.includes(requiredFile),
 		);
@@ -232,6 +239,7 @@ export async function extractAndValidate(buffer) {
 			throw new Error(`Missing required files: ${missingFiles.join(', ')}`);
 		}
 
+		// Extract and validate file contents
 		const extractedFiles = {};
 
 		const defEntry = zipEntries.find((e) => e.entryName === 'definition.json');
@@ -253,6 +261,7 @@ export async function extractAndValidate(buffer) {
 			if (entry) {
 				const fileBuffer = entry.getData();
 
+				// Validate file content
 				await validateFileContent(requiredFile, fileBuffer, defVariables);
 
 				extractedFiles[requiredFile] = {
@@ -364,12 +373,14 @@ export async function quickValidate(buffer) {
 	}
 }
 
+// Export constants for external use
 export const archiveConstants = {
 	REQUIRED_FILES,
 	ALLOWED_EXTENSIONS,
 	MAX_FILE_SIZE,
 };
 
+// Default export for backward compatibility
 export default {
 	validateArchive,
 	extractAndValidate,

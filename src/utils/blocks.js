@@ -14,6 +14,7 @@ const generateImageWithFal = async (prompt, zip) => {
 	try {
 		const { data } = await fal.run('fal-ai/flux/schnell', {
 			input: {
+				// prompt: `TRANSPARENT PNG LOGO: ${prompt}. Minimalist, vector, solid colors, no background`,
 				prompt: prompt,
 				negative_prompt: 'background, text, gradient, shadow, realistic, photo',
 				image_size: 'square_hd',
