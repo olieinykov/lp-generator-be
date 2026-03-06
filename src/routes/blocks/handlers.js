@@ -16,6 +16,8 @@ export const getAllBlocks = async (request, reply) => {
 			sortOrder = 'desc',
 			category,
 			isActive,
+			isReusableAsChildren,
+			isParent,
 			createdBy,
 			updatedBy,
 			createdAtFrom,
@@ -66,6 +68,18 @@ export const getAllBlocks = async (request, reply) => {
 			filters.push(eq(blocks.isActive, false));
 		}
 
+		if (isReusableAsChildren === 'true') {
+			filters.push(eq(blocks.isReusableAsChildren, true));
+		} else if (isReusableAsChildren === 'false') {
+			filters.push(eq(blocks.isReusableAsChildren, false));
+		}
+
+		if (isParent === 'true') {
+			filters.push(eq(blocks.isParent, true));
+		} else if (isParent === 'false') {
+			filters.push(eq(blocks.isParent, false));
+		}
+
 		const order = (column) => (sortOrder === 'asc' ? asc(column) : desc(column));
 
 		const query = db
@@ -75,6 +89,7 @@ export const getAllBlocks = async (request, reply) => {
 				category: blocks.category,
 				isActive: blocks.isActive,
 				isReusableAsChildren: blocks.isReusableAsChildren,
+				isParent: blocks.isParent,
 				archiveUrl: blocks.archiveUrl,
 				definition: blocks.definition,
 				createdAt: blocks.createdAt,
@@ -125,6 +140,7 @@ export const createBlock = async (request, reply) => {
 		const fileData = request.body.file;
 		const isActive = request.body.isActive?.value === 'true';
 		const isReusableAsChildren = request.body.isReusableAsChildren?.value === 'true';
+		const isParent = request.body.isParent?.value === 'true';
 		const name = request.body.name?.value;
 		const category = request.body.category?.value;
 		const description = request.body.description?.value;
@@ -170,6 +186,7 @@ export const createBlock = async (request, reply) => {
 				name,
 				isActive,
 				isReusableAsChildren,
+				isParent,
 				category,
 				archiveUrl,
 				description,
@@ -271,8 +288,14 @@ export const updateBlock = async (request, reply) => {
 		const description = request.body.description?.value;
 		const incomingCategory = request.body.category?.value;
 		const incomingIsActiveRaw = request.body.isActive?.value;
+		const incomingIsReusableAsChildrenRaw = request.body.isReusableAsChildren?.value;
+		const incomingIsParentRaw = request.body.isParent?.value;
 		const incomingIsActive =
 			incomingIsActiveRaw === undefined ? existing.isActive : incomingIsActiveRaw === 'true';
+		const incomingIsReusableAsChildren =
+			incomingIsReusableAsChildrenRaw === undefined ? existing.isReusableAsChildren : incomingIsReusableAsChildrenRaw === 'true';
+		const incomingIsParent =
+			incomingIsParentRaw === undefined ? existing.isParent : incomingIsParentRaw === 'true';
 
 		const userId = '67366103-2833-41a8-aea2-10d589a0705c';
 
@@ -280,6 +303,8 @@ export const updateBlock = async (request, reply) => {
 			name: incomingName ?? existing.name,
 			category: incomingCategory ?? existing.category,
 			isActive: incomingIsActive,
+			isReusableAsChildren: incomingIsReusableAsChildren,
+			isParent: incomingIsParent,
 			description,
 			updatedBy: userId,
 			updatedAt: new Date(),
