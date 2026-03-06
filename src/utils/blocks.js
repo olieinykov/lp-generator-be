@@ -18,7 +18,7 @@ const generateImageWithFal = async (prompt, zip) => {
 				prompt: prompt,
 				negative_prompt: 'background, text, gradient, shadow, realistic, photo',
 				image_size: 'square_hd',
-				num_inference_steps: 4,
+				num_inference_steps: 24,
 				guidance_scale: 3.5,
 				sync_mode: true,
 			},
