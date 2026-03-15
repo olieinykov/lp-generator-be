@@ -7,6 +7,7 @@ import {
 	buildSitePages,
 } from '../../utils/blocks.js';
 import { Worker } from "worker_threads"
+const WORKER_URL = "./src/workers/generatorWorker.js";
 
 export const createSite = async (request, reply) => {
 	try {
@@ -48,7 +49,7 @@ export const createSite = async (request, reply) => {
 			})
 			.returning();
 
-		const worker = new Worker("./src/utils/worker.js", {
+		const worker = new Worker(WORKER_URL, {
 			workerData: {
 				process: "create",
 				siteId: siteData.id,
@@ -70,7 +71,9 @@ export const createSite = async (request, reply) => {
 			 }).where(eq(sites.id, siteData.id));
 		})
 		return reply.status(201).send({
-			status: `Site with id - ${siteData.id} generation started. Wait until the site is ready`,
+			siteId: siteData.id,
+			success: true,
+			status: `Site with id - ${siteData.id} generation started. Wait until the new site is ready`,
 		});
 	} catch (error) {
 		return reply.status(500).send({ error: error.message });
@@ -269,14 +272,13 @@ export const checkStatusSite = async (request, reply) => {
 		}
 
 		let siteData = {
-			generationStatus: "",
-			generationMessage: "",
-			generationError: ""
+			generationStatus: null,
+			generationMessage: null,
+			generationError: null
 		};
 
 		siteData.generationStatus = site.status
 		siteData.generationMessage = operationMessage[site.operationType]
-		siteData.generationError = "There's no errors"
 
 		if(site.status === GENERATION_STATUS.success){
 			const sitePages = buildSitePages(
@@ -396,7 +398,7 @@ export const regenerateSite = async (request, reply) => {
 				})
 				.where(eq(sites.id, site.id));
 
-		const worker = new Worker("./src/utils/worker.js", {
+		const worker = new Worker(WORKER_URL, {
 			workerData: {
 				process: "regenerateSite",
 				siteId: site.id,
@@ -415,6 +417,8 @@ export const regenerateSite = async (request, reply) => {
 			 }).where(eq(sites.id, site.id));
 		})
 		return reply.status(201).send({
+			siteId: site.id,
+			success: true,
 			status: `Site with id - ${site.id} regeneration started. Wait until the new site is ready`,
 		});
 	} catch (err) {
@@ -459,7 +463,7 @@ export const regenerateBlock = async (request, reply) => {
 				})
 				.where(eq(sites.id, site.id));
 
-		const worker = new Worker("./src/utils/worker.js", {
+		const worker = new Worker(WORKER_URL, {
 			workerData: {
 				process: "regenerateBlock",
 				siteId,
@@ -481,6 +485,8 @@ export const regenerateBlock = async (request, reply) => {
 			 }).where(eq(sites.id, site.id));
 		})
 		return reply.status(201).send({
+			siteId: siteId,
+			success: true,
 			status: `Site with id - ${siteId} block regeneration started. Wait until the new block is ready`,
 		});
 	} catch (err) {
