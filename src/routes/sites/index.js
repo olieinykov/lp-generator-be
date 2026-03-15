@@ -1,5 +1,6 @@
 import {
 	activateSite,
+	checkStatusSite,
 	createSite,
 	getAllSites,
 	getOneSite,
@@ -30,6 +31,10 @@ const routes = async (fastify) => {
 	});
 	fastify.get('/:siteId', {
 		handler: getOneSite,
+		schema: getSiteSchema,
+	});
+	fastify.get('/status/:siteId', {
+		handler: checkStatusSite,
 		schema: getSiteSchema,
 	});
 	fastify.put('/:siteId', {
