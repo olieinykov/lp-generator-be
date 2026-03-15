@@ -33,7 +33,7 @@ const routes = async (fastify) => {
 		handler: getOneSite,
 		schema: getSiteSchema,
 	});
-	fastify.get('/status/:siteId', {
+	fastify.get('/:siteId/status', {
 		handler: checkStatusSite,
 		schema: getSiteSchema,
 	});
