@@ -7,7 +7,6 @@ import {
 	buildSitePages,
 } from '../../utils/blocks.js';
 import { Worker } from "worker_threads"
-import { success } from 'zod';
 const WORKER_URL = "./src/workers/generatorWorker.js";
 
 export const createSite = async (request, reply) => {
