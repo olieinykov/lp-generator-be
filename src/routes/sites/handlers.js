@@ -219,22 +219,25 @@ export const getOneSite = async (request, reply) => {
 			.from(sites)
 			.where(eq(sites.id, parseInt(siteId)));
 
-		const sitePages = buildSitePages(
-			site.siteConfigDetailed.pages,
-			site.siteConfigDetailed.generatedTheme,
-			site.language,
-			site.country,
-		);
+
+		const previews = site.status === "error" 
+			? "" 
+			: buildSitePages(
+				site.siteConfigDetailed?.pages,
+				site.siteConfigDetailed?.generatedTheme,
+				site.language,
+				site.country
+			).map(({ previewHtml, filename, pageHasErrors }) => ({
+				html: previewHtml,
+				filename,
+				hasErrors: pageHasErrors,
+		}));
 
 		reply.send({
 			success: true,
 			data: {
 				...site,
-				previews: sitePages.map((page) => ({
-					html: page.previewHtml,
-					filename: page.filename,
-					hasErrors: page.pageHasErrors,
-				})),
+				previews,
 				siteConfig: site?.siteConfigDetailed?.pages?.map((page) => ({
 					...page,
 					blocks: page?.blocks?.map((block) => ({
@@ -372,11 +375,6 @@ export const regenerateSite = async (request, reply) => {
 		if (site.status === GENERATION_STATUS.pending) {
 			return reply.status(400).send({ 
 				error: "Generation already started. Please, wait until it ends." 
-			});
-		}
-		if (site.status === GENERATION_STATUS.error) {
-			return reply.status(400).send({ 
-				error: "The previous site generation failed. Please, check the error details." 
 			});
 		}
 		const { prompt } = request.body;
